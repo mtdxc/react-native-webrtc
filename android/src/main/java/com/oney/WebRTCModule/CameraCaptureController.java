@@ -1,8 +1,10 @@
 package com.oney.WebRTCModule;
 
+import android.content.Context;
 import android.util.Log;
 
 import com.facebook.react.bridge.ReadableMap;
+import com.jiangdg.ausbc.camera.CameraUvcStrategy;
 
 import org.webrtc.CameraEnumerator;
 import org.webrtc.CameraVideoCapturer;
@@ -21,6 +23,7 @@ public class CameraCaptureController extends AbstractVideoCaptureController {
 
     private final CameraEnumerator cameraEnumerator;
     private final ReadableMap constraints;
+    private final CameraUvcStrategy mUvcStrategy;
 
     /**
      * The {@link CameraEventsHandler} used with
@@ -30,11 +33,12 @@ public class CameraCaptureController extends AbstractVideoCaptureController {
      */
     private final CameraEventsHandler cameraEventsHandler = new CameraEventsHandler();
 
-    public CameraCaptureController(CameraEnumerator cameraEnumerator, ReadableMap constraints) {
+    public CameraCaptureController(CameraEnumerator cameraEnumerator, ReadableMap constraints, CameraUvcStrategy uvcStrategy) {
         super(constraints.getInt("width"), constraints.getInt("height"), constraints.getInt("frameRate"));
 
         this.cameraEnumerator = cameraEnumerator;
         this.constraints = constraints;
+        this.mUvcStrategy = uvcStrategy;
     }
 
     public void switchCamera() {
@@ -123,6 +127,23 @@ public class CameraCaptureController extends AbstractVideoCaptureController {
     private VideoCapturer createVideoCapturer(String deviceId, String facingMode) {
         String[] deviceNames = cameraEnumerator.getDeviceNames();
         List<String> failedDevices = new ArrayList<>();
+
+        // If deviceId is specified, then it takes precedence over facingMode.
+        if (deviceId != null) {
+            // if has uvc into id, instance uvc capturer
+            if (deviceId.contains("uvc")) {
+                String message = "Create UVC user-specified camera " + deviceId;
+                try {
+                    UvcCapturer videoCapturer = new UvcCapturer(deviceId, mUvcStrategy);
+                    Log.d(TAG, message + " succeeded");
+                    return videoCapturer;
+                } catch (Throwable tr) {
+                    failedDevices.add(deviceId);
+                    Log.d(TAG, message + " failed");
+                }
+            }
+        }
+
 
         String cameraName = null;
         try {

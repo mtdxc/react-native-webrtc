@@ -17,6 +17,7 @@ import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.UiThreadUtil;
 import com.facebook.react.bridge.WritableArray;
 import com.facebook.react.bridge.WritableMap;
+import com.jiangdg.ausbc.camera.CameraUvcStrategy;
 import com.oney.WebRTCModule.videoEffects.ProcessorProvider;
 import com.oney.WebRTCModule.videoEffects.VideoEffectProcessor;
 import com.oney.WebRTCModule.videoEffects.VideoFrameProcessor;
@@ -55,9 +56,15 @@ class GetUserMediaImpl {
     private Promise displayMediaPromise;
     private Intent mediaProjectionPermissionResultData;
 
+    private UvcEnumerator uvcEnumerator;
+    private CameraUvcStrategy cameraUvcStrategy;
+
     GetUserMediaImpl(WebRTCModule webRTCModule, ReactApplicationContext reactContext) {
         this.webRTCModule = webRTCModule;
         this.reactContext = reactContext;
+
+        this.cameraUvcStrategy = new CameraUvcStrategy(reactContext);
+        this.uvcEnumerator = new UvcEnumerator(this.cameraUvcStrategy);
 
         boolean camera2supported = false;
 
@@ -134,6 +141,14 @@ class GetUserMediaImpl {
 
     ReadableArray enumerateDevices() {
         WritableArray array = Arguments.createArray();
+
+        ReadableArray uvcDevices = uvcEnumerator.enumerateDevices();
+        if (uvcDevices.size() > 0) {
+            for (int j = 0; j < uvcDevices.size(); j++) {
+                array.pushMap(uvcDevices.getMap(j));
+            }
+        }
+
         String[] devices = cameraEnumerator.getDeviceNames();
 
         for (int i = 0; i < devices.length; ++i) {
@@ -191,8 +206,11 @@ class GetUserMediaImpl {
 
             Log.d(TAG, "getUserMedia(video): " + videoConstraintsMap);
 
-            CameraCaptureController cameraCaptureController =
-                    new CameraCaptureController(cameraEnumerator, videoConstraintsMap);
+            CameraCaptureController cameraCaptureController = new CameraCaptureController(
+                cameraEnumerator,
+                videoConstraintsMap,
+                cameraUvcStrategy
+        );
 
             videoTrack = createVideoTrack(cameraCaptureController);
         }
