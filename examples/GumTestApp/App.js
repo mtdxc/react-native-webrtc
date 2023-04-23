@@ -14,6 +14,7 @@ import {
   ScrollView,
   View,
   Text,
+  Alert,
   StatusBar,
 } from 'react-native';
 import { Colors } from 'react-native/Libraries/NewAppScreen';
@@ -26,7 +27,16 @@ const App: () => React$Node = () => {
     if (!stream) {
       let s;
       try {
-        s = await mediaDevices.getUserMedia({ video: true });
+        let constract = { video: true };
+        let devs = await mediaDevices.enumerateDevices();
+        for (dev of devs) {
+          //console.log(dev);
+          if (dev.deviceId.startsWith("uvc-")) {
+            constract.video = {deviceId: dev.deviceId};
+          }
+        }
+        //Alert.alert(JSON.stringify(constract));
+        s = await mediaDevices.getUserMedia(constract);
         setStream(s);
       } catch(e) {
         console.error(e);
