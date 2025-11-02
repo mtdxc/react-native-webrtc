@@ -24,14 +24,14 @@ import org.webrtc.RendererCommon;
 import org.webrtc.RendererCommon.RendererEvents;
 import org.webrtc.RendererCommon.ScalingType;
 import org.webrtc.SurfaceViewRenderer;
+import org.webrtc.VideoFrame;
 import org.webrtc.VideoTrack;
-
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
+import org.webrtc.FlvPlayer;
+import java.util.Map;
 import java.util.List;
 import java.util.Objects;
 
-public class WebRTCView extends ViewGroup {
+public class WebRTCView extends ViewGroup implements FlvPlayer.Observer {
     /**
      * The scaling type to be utilized by default.
      *
@@ -206,6 +206,8 @@ public class WebRTCView extends ViewGroup {
             // window. Additionally, a memory leak was solved in a similar way
             // on iOS.
             tryAddRendererToVideoTrack();
+            if (player!=null)
+                player.setPaused(paused);
         } finally {
             super.onAttachedToWindow();
         }
@@ -214,6 +216,9 @@ public class WebRTCView extends ViewGroup {
     @Override
     protected void onDetachedFromWindow() {
         try {
+            if (player!= null) {
+                player.setPaused(true);
+            }
             // Generally, OpenGL is only necessary while this View is attached
             // to a window so there is no point in having the whole rendering
             // infrastructure hooked up while this View is not attached to a
@@ -413,6 +418,14 @@ public class WebRTCView extends ViewGroup {
         }
     }
 
+    public void setPid(String pid) {
+        this.pid = pid;
+        if (this.player != null)
+            this.player.setId(pid);
+        if (this.surfaceViewRenderer != null)
+            this.surfaceViewRenderer.setName(pid);
+    }
+
     /**
      * In the fashion of
      * https://www.w3.org/TR/html5/embedded-content-0.html#dom-video-videowidth
@@ -470,6 +483,11 @@ public class WebRTCView extends ViewGroup {
                 setVideoTrack(null);
             }
 
+            if (videoTrack==null) {
+                closeFlv();
+                if(streamURL!=null && !streamURL.isEmpty())
+                    openFlv(streamURL);
+            }
             this.streamURL = streamURL;
 
             // After realizing/applying the change in the value of
@@ -537,7 +555,7 @@ public class WebRTCView extends ViewGroup {
      * all preconditions for the start of rendering are met.
      */
     private void tryAddRendererToVideoTrack() {
-        if (!rendererAttached && videoTrack != null && ViewCompat.isAttachedToWindow(this)) {
+        if (!rendererAttached && (videoTrack != null || player != null) && ViewCompat.isAttachedToWindow(this)) {
             EglBase.Context sharedContext = EglUtils.getRootEglBaseContext();
 
             if (sharedContext == null) {
@@ -558,7 +576,8 @@ public class WebRTCView extends ViewGroup {
 
             ThreadUtils.runOnExecutor(() -> {
                 try {
-                    videoTrack.addSink(surfaceViewRenderer);
+                    if (videoTrack!=null)
+                        videoTrack.addSink(surfaceViewRenderer);
                 } catch (Throwable tr) {
                     // XXX If WebRTCModule#mediaStreamTrackRelease has already been
                     // invoked on videoTrack, then it is no longer safe to call addSink
@@ -579,5 +598,110 @@ public class WebRTCView extends ViewGroup {
      */
     public void setOnDimensionsChange(boolean enabled) {
         this.onDimensionsChangeEnabled = enabled;
+    }
+
+    public int statInterval = 0;
+    public int cacheSize = 500 * 1024;
+    public int jitter = 1200; // ms
+    public int playMode = 0;
+    public float rate = 1.0f;
+    public float volume = 1.0f;
+    public boolean paused = false;
+    public boolean muted = false;
+    public boolean mutedVideo = false;
+    public String pid = null;
+    public FlvPlayer player = null;
+    public boolean openFlv(String url) {
+        player = new FlvPlayer(this);
+        boolean ret = player.start(url);
+        if (ret) {
+            if (pid != null)
+                player.setId(pid);
+            player.setPlayMode(playMode);
+            player.setStatInterval(statInterval);
+            player.setCacheSize(cacheSize);
+            player.setJitter(jitter);
+            player.setVolume(volume);
+            player.setPaused(paused);
+            player.setSpeed(rate);
+            player.setMuted(muted);
+            player.setMutedVideo(mutedVideo);
+            tryAddRendererToVideoTrack();
+        }
+        return ret;
+    }
+
+    public void closeFlv() {
+        if (this.player!=null) {
+            this.player.stop(true);
+            this.player = null;
+            removeRendererFromVideoTrack();
+        }
+    }
+
+    private void sendEvent(String name, WritableMap args) {
+        ((ReactContext)getContext()).getJSModule(RCTEventEmitter.class).receiveEvent(getId(), name, args);
+    }
+
+    public void OnRenderFrame(int tsp, int width, int height) {
+        if (this.player == null) return ;
+        // Log.i(TAG, String.format("renderFrame %dx%d %d", width, height, tsp));
+        VideoFrame frame = player.getVideoFrame();
+        if (frame!=null) {
+            surfaceViewRenderer.onFrame(frame);
+            frame.release();
+        }
+    }
+
+    public void OnSeekDone(int time, int code) {
+        Log.i(TAG, String.format("OnSeekDone %d %d", time, code));
+        WritableMap event = Arguments.createMap();
+        event.putInt("time", time);
+        event.putInt("code", code);
+        sendEvent("onSeekDone", event);
+    }
+
+    public void OnStat(int jitter, int speed) {
+        if (this.player == null) return ;
+        // Log.i(TAG, "OnStat");
+        WritableMap event = Arguments.createMap();
+        event.putInt("jitter", jitter);
+        event.putInt("speed", speed);
+        event.putInt("position", player.position());
+        sendEvent("onStat", event);
+    }
+
+    public void OnOpen(String url) {
+        if (this.player == null) return ;
+        Log.i(TAG, "OnOpen " + url);
+        WritableMap event = Arguments.createMap();
+        event.putString("url", url);
+        event.putInt("duration", player.duration());
+        event.putInt("cacheSize", player.cacheSize());
+        event.putInt("jitter", player.jitter());
+        Map<String, Integer> ap = player.audioParam();
+        if (ap!=null) {
+            WritableMap pars = Arguments.createMap();
+            for (String key : ap.keySet()) {
+                pars.putInt(key, ap.get(key));
+            }
+            event.putMap("audio", pars);
+        }
+        Map<String, Integer> vp = player.videoParam();
+        if (vp!=null) {
+            WritableMap pars = Arguments.createMap();
+            for (String key : vp.keySet()) {
+                pars.putInt(key, vp.get(key));
+            }
+            event.putMap("video", pars);
+        }
+        sendEvent("onOpen", event);
+    }
+
+    public void OnClose(int reason) {
+        Log.i(TAG, "OnClose");
+        WritableMap event = Arguments.createMap();
+        event.putInt("reason", reason);
+        sendEvent("onEnd", event);
     }
 }

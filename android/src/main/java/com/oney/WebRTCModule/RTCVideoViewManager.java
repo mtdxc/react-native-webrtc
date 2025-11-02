@@ -1,27 +1,47 @@
 package com.oney.WebRTCModule;
 
 import com.facebook.react.bridge.ReadableMap;
+import com.facebook.react.bridge.Promise;
+import com.facebook.react.bridge.ReactApplicationContext;
+import com.facebook.react.bridge.ReactMethod;
+import com.facebook.react.common.MapBuilder;
+import com.facebook.react.uimanager.NativeViewHierarchyManager;
 import com.facebook.react.uimanager.SimpleViewManager;
 import com.facebook.react.uimanager.ThemedReactContext;
+import com.facebook.react.uimanager.UIBlock;
+import com.facebook.react.uimanager.UIManagerModule;
 import com.facebook.react.uimanager.annotations.ReactProp;
 import com.facebook.react.uimanager.events.RCTEventEmitter;
+import org.webrtc.FlvPlayer;
+import java.util.Map;
 
 import java.util.HashMap;
 import java.util.Map;
 
 public class RTCVideoViewManager extends SimpleViewManager<WebRTCView> {
     private static final String REACT_CLASS = "RTCVideoView";
-
+    private ReactApplicationContext reactContext;
     @Override
     public String getName() {
         return REACT_CLASS;
     }
-
+    public RTCVideoViewManager(ReactApplicationContext context) {
+        this.reactContext = context;
+    }
     @Override
     public WebRTCView createViewInstance(ThemedReactContext context) {
         return new WebRTCView(context);
     }
-
+    @Override
+    public Map getExportedCustomBubblingEventTypeConstants() {
+        return MapBuilder.builder()
+                .put("onOpen", MapBuilder.of("phasedRegistrationNames", MapBuilder.of("bubbled", "onOpen")))
+                .put("onEnd", MapBuilder.of("phasedRegistrationNames", MapBuilder.of("bubbled", "onEnd")))
+                .put("onStat", MapBuilder.of("phasedRegistrationNames", MapBuilder.of("bubbled", "onStat")))
+                .put("onSeekDone", MapBuilder.of("phasedRegistrationNames", MapBuilder.of("bubbled", "onSeekDone")))
+                .put("onDimensionsChange", MapBuilder.of("phasedRegistrationNames", MapBuilder.of("bubbled", "onDimensionsChange")))
+        .build();
+    }
     /**
      * Sets the indicator which determines whether a specific {@link WebRTCView}
      * is to mirror the video specified by {@code streamURL} during its rendering.
@@ -87,12 +107,121 @@ public class RTCVideoViewManager extends SimpleViewManager<WebRTCView> {
         view.setOnDimensionsChange(onDimensionsChange);
     }
 
-    @Override
-    public Map<String, Object> getExportedCustomDirectEventTypeConstants() {
-        Map<String, Object> eventTypeConstants = new HashMap<>();
-        Map<String, String> dimensionsChangeEvent = new HashMap<>();
-        dimensionsChangeEvent.put("registrationName", "onDimensionsChange");
-        eventTypeConstants.put("onDimensionsChange", dimensionsChangeEvent);
-        return eventTypeConstants;
+    @ReactProp(name = "stop")
+    public void setStop(WebRTCView view, int wait) {
+        if(view.player != null)
+            view.player.stop(wait!=0);
+    }
+
+    @ReactProp(name = "rate", defaultFloat = 1.0f)
+    public void setSpeed(WebRTCView view, float v) {
+        view.rate = v;
+        if (view.player != null)
+            view.player.setSpeed(v);
+    }
+    @ReactProp(name = "volume", defaultFloat = 1.0f)
+    public void setVolume(WebRTCView view, float v) {
+        view.volume = v;
+        if (view.player != null)
+            view.player.setVolume(v);
+    }
+    @ReactProp(name = "pid")
+    public void setId(WebRTCView view, String v) {
+        view.setPid(v);
+    }
+    @ReactProp(name = "jitter")
+    public void setJitter(WebRTCView view, int v) {
+        view.jitter = v;
+        if (view.player != null)
+            view.player.setJitter(v);
+    }
+    @ReactProp(name = "playMode")
+    public void setPlayMode(WebRTCView view, int v) {
+        view.playMode = v;
+        if (view.player != null)
+            view.player.setPlayMode(v);
+    }
+    @ReactProp(name = "statInterval")
+    public void setStatInterval(WebRTCView view, int v) {
+        view.statInterval = v;
+        if (view.player != null)
+            view.player.setStatInterval(v);
+    }
+
+    @ReactProp(name = "cacheSize")
+    public void setCacheSize(WebRTCView view, int v) {
+        view.cacheSize = v;
+        if (view.player != null)
+            view.player.setCacheSize(v);
+    }
+    @ReactProp(name = "paused")
+    public void setPaused(WebRTCView view, boolean v) {
+        view.paused = v;
+        if (view.player != null)
+            view.player.setPaused(v);
+    }
+    @ReactProp(name = "muted")
+    public void setMuted(WebRTCView view, boolean v) {
+        view.muted = v;
+        if (view.player != null)
+            view.player.setMuted(v);
+    }
+    @ReactProp(name = "mutedVideo")
+    public void setMutedVideo(WebRTCView view, boolean v) {
+        view.mutedVideo = v;
+        if (view.player != null)
+            view.player.setMutedVideo(v);
+    }
+    @ReactProp(name = "seek")
+    public void setSeek(WebRTCView view, int v) {
+        if (view.player != null)
+            view.player.seek(v);
+    }
+
+    public static interface UICall {
+        public void call(FlvPlayer player);
+    }
+    private void uiCall(int vid, boolean callnil, UICall call) {
+        reactContext.getNativeModule(UIManagerModule.class).addUIBlock(new UIBlock() {
+            @Override
+            public void execute(NativeViewHierarchyManager uiManager) {
+                WebRTCView view = (WebRTCView)uiManager.resolveView(vid);
+                if (view!=null && view.player != null) {
+                    call.call(view.player);
+                } else if(callnil) {
+                    call.call(null);
+                }
+            }
+        });
+    }
+
+    @ReactMethod
+    public void seek(int viewTag, int pos) {
+        uiCall(viewTag, false, new UICall() {
+            @Override
+            public void call(FlvPlayer p) {
+                p.seek(pos);
+            }
+        });
+    }
+
+    @ReactMethod
+    public void stop(int viewTag, int wait) {
+        uiCall(viewTag, false, new UICall() {
+            @Override
+            public void call(FlvPlayer p) {
+                p.stop(wait!=0);
+            }
+        });
+    }
+
+    @ReactMethod
+    public void position(int viewTag, Promise promise) {
+        uiCall(viewTag, true, new UICall() {
+            @Override
+            public void call(FlvPlayer p) {
+                promise.resolve(p!=null?p.position():0);
+            }
+        });
     }
 }

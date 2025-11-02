@@ -15,11 +15,12 @@ public class WebRTCModulePackage implements ReactPackage {
         modules.add(new WebRTCModule(reactContext));
         modules.add(new RtcAudioEngineController(reactContext));
         modules.add(new RtcAudioUtil(reactContext));
+        modules.add(new RTCVideoViewManager(reactContext));
         return modules;
     }
 
     @Override
     public List<ViewManager> createViewManagers(ReactApplicationContext reactContext) {
-        return Arrays.<ViewManager>asList(new RTCVideoViewManager());
+        return Arrays.<ViewManager>asList(new RTCVideoViewManager(reactContext));
     }
 }

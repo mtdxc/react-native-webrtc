@@ -4,7 +4,7 @@
 #import <React/RCTLog.h>
 #import <React/RCTUIManager.h>
 #import <React/RCTView.h>
-
+#import <React/RCTUIManager.h>
 #import <WebRTC/RTCMediaStream.h>
 #if TARGET_OS_OSX
 #import <WebRTC/RTCMTLNSVideoView.h>
@@ -14,7 +14,7 @@
 #import <WebRTC/RTCCVPixelBuffer.h>
 #import <WebRTC/RTCVideoFrame.h>
 #import <WebRTC/RTCVideoTrack.h>
-
+#import <WebRTC/RTCPlayer.h>
 #import "PIPController.h"
 #import "RTCVideoViewManager.h"
 #import "WebRTCModule.h"
@@ -23,7 +23,7 @@
  * Implements an equivalent of {@code HTMLVideoElement} i.e. Web's video
  * element.
  */
-@interface RTCVideoView : RCTView<RTCVideoViewDelegate>
+@interface RTCVideoView : RCTView<RTCVideoViewDelegate, RTCPlayEvent>
 
 /**
  * The indicator which determines whether this {@code RTCVideoView} is to mirror
@@ -31,6 +31,17 @@
  * applications choose to mirror the front/user-facing camera.
  */
 @property(nonatomic) BOOL mirror;
+
+@property(nonatomic) int statInterval;
+@property(nonatomic) int jitter;
+@property(nonatomic) int cacheSize;
+@property(nonatomic) int playMode;
+@property(nonatomic) float volume;
+@property(nonatomic) float rate;
+@property(nonatomic) BOOL paused;
+@property(nonatomic) BOOL muted;
+@property(nonatomic) BOOL mutedVideo;
+@property(nonatomic, copy) NSString* pid;
 
 /**
  * In the fashion of
@@ -60,6 +71,11 @@
  * The {@link RTCVideoTrack}, if any, which this instance renders.
  */
 @property(nonatomic, strong) RTCVideoTrack *videoTrack;
+@property(nonatomic, strong) RTCPlayer *player;
+@property(nonatomic, copy) RCTBubblingEventBlock onOpen;
+@property(nonatomic, copy) RCTBubblingEventBlock onEnd;
+@property(nonatomic, copy) RCTBubblingEventBlock onStat;
+@property(nonatomic, copy) RCTBubblingEventBlock onSeekDone;
 
 /**
  * Reference to the main WebRTC RN module.
@@ -98,6 +114,13 @@
             });
         }
     }
+    if (_player) {
+      if (self.window) {
+        _player.paused = _paused;
+      } else {
+        _player.paused = true;
+      }
+    }
 }
 
 /**
@@ -117,6 +140,13 @@
         _videoView = subview;
 #endif
         _objectFit = RTCVideoViewObjectFitCover;
+        _jitter = 1200;
+        _cacheSize = 512 * 1024;
+        _playMode = 0;
+        _volume = 1.0f;
+        _rate = 1.0f;
+        _paused = _muted = _mutedVideo = false;
+        _pid = nil;
         [self addSubview:self.videoView];
         self.videoView.delegate = self;
     }
@@ -235,6 +265,66 @@
     }
 }
 
+-(void)setStatInterval:(int)val{
+  _statInterval = val;
+  if (_player)
+    _player.statInterval = val;
+}
+
+-(void)setJitter:(int)val{
+  _jitter = val;
+  if (_player)
+    _player.jitter = val;
+}
+
+-(void)setCacheSize:(int)val{
+  _cacheSize = val;
+  if (_player)
+    _player.cacheSize = val;
+}
+
+-(void)setPid:(NSString*)val{
+  _pid = val;
+  if (_player)
+    _player.id = val;
+}
+
+-(void)setPlayMode:(int) val{
+  _playMode = val;
+  if (_player)
+    _player.playMode = val;
+}
+
+-(void)setVolume:(float) val {
+  _volume = val;
+  if (_player)
+    _player.volume = val;
+}
+
+-(void)setRate:(float) val {
+  _rate = val;
+  if (_player)
+    _player.speed = val;
+}
+
+-(void)setPaused:(BOOL)val {
+  _paused = val;
+  if (_player)
+    _player.paused = val;
+}
+
+-(void)setMuted:(BOOL)val {
+  _muted = val;
+  if (_player)
+    _player.muted = val;
+}
+
+-(void)setMutedVideo:(BOOL)val {
+  _mutedVideo = val;
+  if (_player)
+    _player.mutedVideo = val;
+}
+
 /**
  * Implements the setter of the {@link #videoTrack} property of this
  * {@code RTCVideoView}.
@@ -254,41 +344,8 @@
 
         [_pipController setVideoTrack:videoTrack];
         _videoTrack = videoTrack;
-
-        // Clear the videoView by rendering a 2x2 blank frame.
-        CVPixelBufferRef pixelBuffer;
-        CVReturn err = CVPixelBufferCreate(NULL, 2, 2, kCVPixelFormatType_32BGRA, NULL, &pixelBuffer);
-        if (err == kCVReturnSuccess) {
-            const int kBytesPerPixel = 4;
-            CVPixelBufferLockBaseAddress(pixelBuffer, 0);
-            int bufferWidth = (int)CVPixelBufferGetWidth(pixelBuffer);
-            int bufferHeight = (int)CVPixelBufferGetHeight(pixelBuffer);
-            size_t bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer);
-            uint8_t *baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer);
-
-            for (int row = 0; row < bufferHeight; row++) {
-                uint8_t *pixel = baseAddress + row * bytesPerRow;
-                for (int column = 0; column < bufferWidth; column++) {
-                    pixel[0] = 0;  // BGRA, Blue value
-                    pixel[1] = 0;  // Green value
-                    pixel[2] = 0;  // Red value
-                    pixel[3] = 0;  // Alpha value
-                    pixel += kBytesPerPixel;
-                }
-            }
-
-            CVPixelBufferUnlockBaseAddress(pixelBuffer, 0);
-            int64_t time = (int64_t)(CFAbsoluteTimeGetCurrent() * 1000000000);
-            RTCCVPixelBuffer *buffer = [[RTCCVPixelBuffer alloc] initWithPixelBuffer:pixelBuffer];
-            RTCVideoFrame *frame = [[[RTCVideoFrame alloc] initWithBuffer:buffer
-                                                                 rotation:RTCVideoRotation_0
-                                                              timeStampNs:time] newI420VideoFrame];
-
-            [self.videoView renderFrame:frame];
-
-            CVPixelBufferRelease(pixelBuffer);
-        }
-
+        RCTLogInfo(@"%@ setVideoTrack %@", _pid, videoTrack.trackId);
+        [self clearView];
         // See "didMoveToWindow" above.
         if (videoTrack && self.window) {
             dispatch_async(_module.workerQueue, ^{
@@ -298,7 +355,68 @@
     }
 }
 
+-(void) clearView {
+    // Clear the videoView by rendering a 2x2 blank frame.
+    CVPixelBufferRef pixelBuffer;
+    CVReturn err = CVPixelBufferCreate(NULL, 2, 2, kCVPixelFormatType_32BGRA, NULL, &pixelBuffer);
+    if (err == kCVReturnSuccess) {
+        const int kBytesPerPixel = 4;
+        CVPixelBufferLockBaseAddress(pixelBuffer, 0);
+        int bufferWidth = (int)CVPixelBufferGetWidth(pixelBuffer);
+        int bufferHeight = (int)CVPixelBufferGetHeight(pixelBuffer);
+        size_t bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer);
+        uint8_t *baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer);
+
+        for (int row = 0; row < bufferHeight; row++) {
+            uint8_t *pixel = baseAddress + row * bytesPerRow;
+            for (int column = 0; column < bufferWidth; column++) {
+                pixel[0] = 0;  // BGRA, Blue value
+                pixel[1] = 0;  // Green value
+                pixel[2] = 0;  // Red value
+                pixel[3] = 0;  // Alpha value
+                pixel += kBytesPerPixel;
+            }
+        }
+
+        CVPixelBufferUnlockBaseAddress(pixelBuffer, 0);
+        int64_t time = (int64_t)(CFAbsoluteTimeGetCurrent() * 1000000000);
+        RTCCVPixelBuffer *buffer = [[RTCCVPixelBuffer alloc] initWithPixelBuffer:pixelBuffer];
+        RTCVideoFrame *frame = [[[RTCVideoFrame alloc] initWithBuffer:buffer
+                                                           rotation:RTCVideoRotation_0
+                                                        timeStampNs:time] newI420VideoFrame];
+
+        [self.videoView renderFrame:frame];
+
+        CVPixelBufferRelease(pixelBuffer);
+    }
+}
+
+-(void)closeFlv {
+  if (_player) {
+    [_player stop:true];
+    _player = nil;
+    [self clearView];
+  }
+}
+
+-(void)openFlv:(NSString*) url {
+  _player = [[RTCPlayer alloc] init:self];
+  _player.id = _pid;
+  if ([_player start:url]) {
+    _player.playMode = _playMode;
+    _player.statInterval = _statInterval;
+    _player.jitter = _jitter;
+    _player.cacheSize = _cacheSize;
+    _player.paused = _paused;
+    _player.muted = _muted;
+    _player.mutedVideo = _mutedVideo;
+    _player.speed = _rate;
+    _player.volume = _volume;
+  }
+}
+
 - (void)videoView:(id)videoView didChangeVideoSize:(CGSize)size {
+    RCTLogInfo(@"%@ didChangeVideoSize %dx%d", _pid, (int)size.width, (int)size.height);
     // Capture the callback block to avoid accessing it across threads
     RCTDirectEventBlock callback = self.onDimensionsChange;
     if (callback) {
@@ -308,6 +426,47 @@
             callback(eventData);
         });
     }
+}
+
+-(void)OnRenderFrame:(int) tsp width:(int) width height:(int) height {
+  if(!_player) return ;
+  RTCVideoFrame* frame = [_player getVideoFrame];
+  if (frame) {
+    [self.videoView renderFrame:frame];
+  }
+}
+
+-(void)OnSeekDone:(int) msTime code:(int) code {
+  NSLog(@"onSeekDone %d code %d", msTime, code);
+  if (self.onSeekDone)
+    self.onSeekDone(@{ @"time": @(msTime),
+             @"code": @(code) });
+}
+
+-(void)OnStat:(int) jitter speed: (int) speed {
+  // NSLog(@"onStat %d speed %d", jitter, speed);
+  if (self.onStat && _player)
+    self.onStat(@{@"jitter":@(jitter),
+             @"speed":@(speed),
+             @"position":@(_player.position) });
+}
+
+-(void)OnOpen:(NSString*) url {
+  NSLog(@"onOpen %@", url);
+  if (self.onOpen && _player)
+    self.onOpen(@{@"url": url,
+          @"duration":  @([_player duration]),
+          @"cacheSize": @(_player.cacheSize),
+          @"jitter":  @(_player.jitter),
+          @"audio":[_player audio_param]?[_player audio_param]:@{},
+          @"video":[_player video_param]?[_player video_param]:@{}
+        });
+}
+
+-(void)OnClose:(int) conn {
+  NSLog(@"onClose %d", conn);
+  if (self.onEnd)
+    self.onEnd(@{@"reason":@(conn)});
 }
 
 @end
@@ -351,6 +510,7 @@ RCT_EXPORT_VIEW_PROPERTY(onDimensionsChange, RCTDirectEventBlock)
 RCT_CUSTOM_VIEW_PROPERTY(streamURL, NSString *, RTCVideoView) {
     if (!json) {
         view.videoTrack = nil;
+        [view closeFlv];
         return;
     }
 
@@ -362,7 +522,12 @@ RCT_CUSTOM_VIEW_PROPERTY(streamURL, NSString *, RTCVideoView) {
         NSArray *videoTracks = stream ? stream.videoTracks : @[];
         RTCVideoTrack *videoTrack = [videoTracks firstObject];
         if (!videoTrack) {
-            RCTLogWarn(@"No video stream for react tag: %@", streamReactTag);
+          // RCTLogWarn(@"No video stream for react tag: %@", streamReactTag);
+          dispatch_async(dispatch_get_main_queue(), ^{
+            [view closeFlv];
+            if (streamReactTag && streamReactTag.length > 0)
+              [view openFlv:streamReactTag];
+          });
         } else {
             dispatch_async(dispatch_get_main_queue(), ^{
                 view.videoTrack = videoTrack;
@@ -404,6 +569,72 @@ RCT_EXPORT_METHOD(stopIOSPIP : (nonnull NSNumber *)reactTag) {
         }];
     }
 }
+
+RCT_EXPORT_VIEW_PROPERTY(onOpen, RCTBubblingEventBlock)
+RCT_EXPORT_VIEW_PROPERTY(onSeekDone, RCTBubblingEventBlock)
+RCT_EXPORT_VIEW_PROPERTY(onEnd, RCTBubblingEventBlock)
+RCT_EXPORT_VIEW_PROPERTY(onStat, RCTBubblingEventBlock)
+RCT_EXPORT_VIEW_PROPERTY(statInterval, int);
+RCT_EXPORT_VIEW_PROPERTY(jitter, int);
+RCT_EXPORT_VIEW_PROPERTY(cacheSize, int);
+RCT_EXPORT_VIEW_PROPERTY(playMode, int);
+RCT_EXPORT_VIEW_PROPERTY(pid, NSString*);
+RCT_EXPORT_VIEW_PROPERTY(volume, float);
+RCT_EXPORT_VIEW_PROPERTY(rate, float);
+RCT_EXPORT_VIEW_PROPERTY(paused, BOOL);
+RCT_EXPORT_VIEW_PROPERTY(muted, BOOL);
+RCT_EXPORT_VIEW_PROPERTY(mutedVideo, BOOL);
+
+RCT_CUSTOM_VIEW_PROPERTY(seek, int, RTCVideoView) {
+  if (view.player)
+    [view.player seek: [RCTConvert int:json]];
+}
+
+RCT_CUSTOM_VIEW_PROPERTY(stop, int, RTCVideoView) {
+  if (view.player)
+    [view.player stop: [RCTConvert int:json]];
+}
+
+typedef void (^RTCVideoViewBlock)(RTCPlayer *view);
+-(void) uiCall:(NSNumber*) reactTag check:(bool)check block:(RTCVideoViewBlock) block {
+  [self.bridge.uiManager addUIBlock:^(RCTUIManager *uiManager, NSDictionary<NSNumber *,UIView *> *viewRegistry) {
+    RTCVideoView *view =(RTCVideoView *) viewRegistry[reactTag];
+      if (!view || ![view isKindOfClass:[RTCVideoView class]]) {
+          RCTLogError(@"Cannot find NativeView with tag #%@", reactTag);
+          if (check) {
+            block(nil);
+          }
+          return;
+      }
+      block(view.player);
+  }];
+}
+
+RCT_EXPORT_METHOD(stop:(nonnull NSNumber*) reactTag wait:(int)wait) {
+  [self uiCall:reactTag check:false block:^(RTCPlayer* p) {
+    if (p)
+      [p stop:wait];
+  }];
+}
+
+RCT_EXPORT_METHOD(seek:(nonnull NSNumber*) reactTag msTime:(int)msTime) {
+  [self uiCall:reactTag check:false block:^(RTCPlayer* p) {
+    if (p)
+      [p seek:msTime];
+  }];
+}
+
+RCT_EXPORT_METHOD(position:(nonnull NSNumber*) reactTag 
+                  resolve: (RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject) {
+  [self uiCall:reactTag check:true block:^(RTCPlayer* p){
+    int ret = 0;
+    if (p)
+      ret = [p position];
+    resolve([NSNumber numberWithInt:ret]);
+  }];
+}
+
 + (BOOL)requiresMainQueueSetup {
     return NO;
 }
