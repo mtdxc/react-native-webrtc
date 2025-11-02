@@ -1,6 +1,6 @@
 import { EventTarget, Event, defineEventAttribute } from 'event-target-shim/index';
 import { NativeModules } from 'react-native';
-
+import TrackDataEvent from './TrackDataEvent';
 import { MediaTrackConstraints } from './Constraints';
 import { addListener, removeListener } from './EventEmitter';
 import Logger from './Logger';
@@ -36,6 +36,10 @@ type MediaStreamTrackEventMap = {
     ended: Event<'ended'>;
     mute: Event<'mute'>;
     unmute: Event<'unmute'>;
+    data: TrackDataEvent<'data'>;
+    text: TrackDataEvent<'text'>;
+    audio: TrackDataEvent<'audio'>;
+    video: TrackDataEvent<'video'>;
 }
 
 export default class MediaStreamTrack extends EventTarget<MediaStreamTrackEventMap> {
@@ -127,6 +131,14 @@ export default class MediaStreamTrack extends EventTarget<MediaStreamTrackEventM
         this.applyConstraints(constraints);
     }
 
+    _monitorData(val:Number, size:Number) {
+        if (this.kind !== 'audio') {
+            throw new Error('Only implemented for audio tracks');
+        }
+
+        WebRTCModule.mediaStreamTrackMonitorData(this.remote ? this._peerConnectionId : -1, this.id, val, size);
+    }
+
     _setVideoEffects(names: string[]) {
         if (this.remote) {
             throw new Error('Not implemented for remote tracks');
@@ -138,7 +150,6 @@ export default class MediaStreamTrack extends EventTarget<MediaStreamTrackEventM
 
         WebRTCModule.mediaStreamTrackSetVideoEffects(this.id, names);
     }
-
     _setVideoEffect(name: string) {
         this._setVideoEffects([ name ]);
     }
@@ -191,6 +202,22 @@ export default class MediaStreamTrack extends EventTarget<MediaStreamTrackEventM
         WebRTCModule.mediaStreamTrackSetVolume(this.remote ? this._peerConnectionId : -1, this.id, volume);
     }
 
+
+    startRecord(path: String, cb ?:number) : Promise<boolean> {
+        if (!WebRTCModule.mediaStreamTrackStartRecord) {
+            return Promise.resolve(false);
+        }
+        if(!cb) cb = 0;
+        return WebRTCModule.mediaStreamTrackStartRecord(this.remote ? this._peerConnectionId : -1, this.id, path, cb);
+    }
+
+    stopRecord() : Promise<boolean> {
+        if (!WebRTCModule.mediaStreamTrackStopRecord) {
+             return Promise.resolve(false);
+        }
+        return WebRTCModule.mediaStreamTrackStopRecord(this.remote ? this._peerConnectionId : -1, this.id);
+    }
+
     /**
      * Applies a new set of constraints to the track.
      *
@@ -239,6 +266,16 @@ export default class MediaStreamTrack extends EventTarget<MediaStreamTrackEventM
 
             this.dispatchEvent(new Event('ended'));
         });
+
+        addListener(this, 'mediaStreamTrackData', (ev: any) => {
+            if (ev.trackId !== this.id || this._readyState === 'ended') {
+                return;
+            }
+            let type = ev.type;
+            let data = ev.data;
+            //console.log('mediaStreamTrackData', type, data);
+            this.dispatchEvent(new TrackDataEvent(type, {data}));
+        });
     }
 
     release(): void {
@@ -255,7 +292,10 @@ export default class MediaStreamTrack extends EventTarget<MediaStreamTrackEventM
  * Define the `onxxx` event handlers.
  */
 const proto = MediaStreamTrack.prototype;
-
+defineEventAttribute(proto, 'text');
+defineEventAttribute(proto, 'audio');
+defineEventAttribute(proto, 'video');
+defineEventAttribute(proto, 'data');
 defineEventAttribute(proto, 'ended');
 defineEventAttribute(proto, 'mute');
 defineEventAttribute(proto, 'unmute');

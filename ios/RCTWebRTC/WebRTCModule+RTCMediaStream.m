@@ -17,6 +17,119 @@
 #import "VideoCaptureController.h"
 #import "RTCBeautyFilter.h"
 
+@interface StreamTrackRender : NSObject<RTCAudioRender, RTCRecordSink>
+-(instancetype)init:(WebRTCModule*) module dict:(NSDictionary*) dict;
+@end
+
+@implementation StreamTrackRender {
+  WebRTCModule* module_;
+  NSMutableDictionary* dict_;
+  bool stream_;
+  short* buff_;
+  int bpos_;
+  int _type;
+  int _size;
+}
+
+- (void)dealloc {
+  if (buff_) {
+    free(buff_);
+    buff_ = 0;
+  }
+  //[super dealloc];
+}
+
+-(instancetype)init:(WebRTCModule*) module id:(NSString*) id pcId:(int) pcId stream:(bool)stream {
+  if([super init]) {
+    module_ = module;
+    dict_ = [[NSMutableDictionary alloc] init];
+    dict_[@"pcId"] = [NSNumber numberWithInt:pcId];
+    dict_[stream?@"streamId":@"trackId"] = id;
+    stream_ = stream;
+    buff_ = 0;
+    bpos_ = 0;
+    _type = 0;
+    _size = 0;
+  }
+  return self;
+}
+
+- (void)setupData:(int) type size:(int) size {
+  _type = type;
+  _size = size;
+}
+
+- (NSString*)eventName {
+  return stream_ ? kEventMediaStreamData : kEventMediaStreamTrackData;
+}
+
+- (void)onTextOut: (NSString*)text {
+  NSMutableDictionary* body = [dict_ mutableCopy];
+  body[@"data"] = text;
+  body[@"type"] =  @"text";
+  [module_ sendEventWithName:[self eventName] body:body];
+}
+
+- (void)onAudioData: (NSData *)data tsp:(long) tsp {
+  NSMutableDictionary* body = [dict_ mutableCopy];
+  body[@"data"] = [data base64Encoding];
+  body[@"tsp"] = [NSNumber numberWithLong:tsp];
+  body[@"type"] =  @"audio";
+  [module_ sendEventWithName:[self eventName] body:body];
+}
+
+- (void)onVideoData: (NSData *)data tsp:(long) tsp {
+  NSMutableDictionary* body = [dict_ mutableCopy];
+  body[@"data"] = [data base64Encoding];
+  body[@"tsp"] = [NSNumber numberWithLong:tsp];
+  body[@"type"] =  @"video";
+  [module_ sendEventWithName:[self eventName] body:body];
+}
+
+- (void)onPcmData: (short *)pcmBuffer samplerate:(int)samplerate channel:(int)channel samples:(int)samples tsp_ms:(int64_t) tsp_ms {
+  if (samples < _size) {
+    if (!buff_) {
+      buff_ = (short*)malloc(channel * 2 * (samples + _size));
+      bpos_ = 0;
+    }
+    memcpy(buff_ + bpos_ * channel, pcmBuffer, samples * channel * 2);
+    bpos_ += samples;
+    int pos = 0;
+    while (bpos_ - pos >= _size) {
+      [self onPcmData:buff_ + pos * channel samplerate:samplerate channel:channel samples:_size tsp_ms:tsp_ms];
+      pos += _size;
+    }
+    if (pos) {
+      bpos_ -= pos;
+      if (bpos_)
+        memmove(buff_, buff_ + pos * channel, bpos_ * channel * 2);
+    }
+    return ;
+  }
+  
+  NSMutableDictionary* body = [dict_ mutableCopy];
+  if(_type == 1){
+    NSData* data = [NSData dataWithBytes:pcmBuffer length:samples * channel * 2];
+    body[@"data"] = [data base64Encoding];
+  }
+  else {
+    NSMutableArray* ary = [[NSMutableArray alloc] init];
+    for (int i = 0; i<samples * channel;i++) {
+      if(_type == 2)
+        [ary addObject: [NSNumber numberWithInt:pcmBuffer[i]]];
+      if(_type == 3)
+        [ary addObject: [NSNumber numberWithFloat:pcmBuffer[i]/32768.0f]];
+    }
+    body[@"data"] = ary;
+  }
+  body[@"samplerate"] = [NSNumber numberWithInt:samplerate];
+  body[@"channel"] = [NSNumber numberWithInt:channel];
+  body[@"samples"] = [NSNumber numberWithInt:samples];
+  body[@"type"] =  @"data";
+  [module_ sendEventWithName:[self eventName] body:body];
+}
+@end
+
 @implementation WebRTCModule (RTCMediaStream)
 
 - (VideoEffectProcessor *)videoEffectProcessor {
@@ -384,6 +497,7 @@ RCT_EXPORT_METHOD(mediaStreamRelease : (nonnull NSString *)streamID) {
     RTCMediaStream *stream = self.localStreams[streamID];
     if (stream) {
         [self.localStreams removeObjectForKey:streamID];
+        [stream stopRecord];
     }
 }
 
@@ -397,6 +511,7 @@ RCT_EXPORT_METHOD(mediaStreamTrackRelease : (nonnull NSString *)trackID) {
         track.isEnabled = NO;
         [track.captureController stopCapture];
         [self.localTracks removeObjectForKey:trackID];
+        [track stopRecord];
     }
 #endif
 }
@@ -417,6 +532,96 @@ RCT_EXPORT_METHOD(mediaStreamTrackSetEnabled : (nonnull NSNumber *)pcId : (nonnu
         }
     }
 #endif
+}
+
+RCT_EXPORT_METHOD(mediaStreamStartRecord : (nonnull NSString *)streamID
+                    path    : (NSString*)path 
+                    cb      : (int) cb
+                    resolve : (RCTPromiseResolveBlock)resolve
+                    reject  : (RCTPromiseRejectBlock)reject) {
+    RTCMediaStream *mediaStream = [self streamForReactTag:streamID];
+    if (mediaStream == nil) {
+        reject(@"not_found", @"stream not found", nil);
+        return;
+    }
+    bool ret = [mediaStream startRecord:path];
+    if (ret && cb) {
+      StreamTrackRender* render = [[StreamTrackRender alloc] init:self id:streamID pcId:-1 stream:true];
+      [mediaStream setRecordSink:render];
+    }
+    resolve([NSNumber numberWithBool: ret]);
+}
+
+RCT_EXPORT_METHOD(mediaStreamStopRecord : (nonnull NSString *)streamID
+                    resolve : (RCTPromiseResolveBlock)resolve
+                    reject  : (RCTPromiseRejectBlock)reject) {
+    RTCMediaStream *mediaStream = [self streamForReactTag:streamID];
+    if (mediaStream == nil) {
+        reject(@"not_found", @"stream not found", nil);
+        return;
+    }
+    bool ret = [mediaStream stopRecord];
+    resolve([NSNumber numberWithBool: ret]);
+}
+
+RCT_EXPORT_METHOD(mediaStreamTrackMonitorData : (nonnull NSNumber *)pcId
+                    trackID : (nonnull NSString *)trackID
+                    type    : (int)type
+                    size    : (int) size
+                    resolve : (RCTPromiseResolveBlock)resolve
+                    reject  : (RCTPromiseRejectBlock)reject) {
+    RTCMediaStreamTrack *track = [self trackForId:trackID pcId:pcId];
+    if (track == nil) {
+        reject(@"not_found", @"track not found", nil);
+        return;
+    }
+    bool ret = false;
+    if ([track.kind isEqualToString:@"audio"]) {
+      RTCAudioTrack* audio = (RTCAudioTrack*)track;
+      if(audio.audioRender) {
+        [audio removeRender : audio.audioRender];
+        audio.audioRender = NULL;
+      }
+      if (type) {
+        if(!audio.audioRender)
+          audio.audioRender = [[StreamTrackRender alloc] init:self id:trackID pcId:pcId stream:false];
+        [audio.audioRender setupData:type size:size];
+        [audio addRender:audio.audioRender];
+      }
+    }
+    resolve([NSNumber numberWithBool: ret]);
+}
+
+RCT_EXPORT_METHOD(mediaStreamTrackStartRecord : (nonnull NSNumber *)pcId 
+                    trackID : (nonnull NSString *)trackID 
+                    path    : (NSString*)path
+                    cb      : (int)cb
+                    resolve : (RCTPromiseResolveBlock)resolve
+                    reject  : (RCTPromiseRejectBlock)reject) {
+    RTCMediaStreamTrack *track = [self trackForId:trackID pcId:pcId];
+    if (track == nil) {
+        reject(@"not_found", @"track not found", nil);
+        return;
+    }
+    bool ret = [track startRecord:path];
+    if (ret && cb) {
+      StreamTrackRender* render = [[StreamTrackRender alloc] init:self id:trackID pcId:pcId stream:false];
+      [track setRecordSink:render];
+    }
+    resolve([NSNumber numberWithBool: ret]);
+}
+
+RCT_EXPORT_METHOD(mediaStreamTrackStopRecord : (nonnull NSNumber *)pcId
+                    trackID : (nonnull NSString *)trackID
+                    resolve : (RCTPromiseResolveBlock)resolve
+                    reject  : (RCTPromiseRejectBlock)reject) {
+    RTCMediaStreamTrack *track = [self trackForId:trackID pcId:pcId];
+    if (track == nil) {
+        reject(@"not_found", @"track not found", nil);
+        return;
+    }
+    bool ret = [track stopRecord];
+    resolve([NSNumber numberWithBool: ret]);
 }
 
 RCT_EXPORT_METHOD(mediaStreamTrackApplyConstraints : (nonnull NSString *)trackID : (NSDictionary *)

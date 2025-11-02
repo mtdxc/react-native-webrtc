@@ -21,6 +21,8 @@ const NATIVE_EVENTS = [
     'dataChannelStateChanged',
     'dataChannelReceiveMessage',
     'dataChannelDidChangeBufferedAmount',
+    'mediaStreamData',
+    'mediaStreamTrackData',
     'mediaStreamTrackMuteChanged',
     'mediaStreamTrackEnded',
 ];

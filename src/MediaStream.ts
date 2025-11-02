@@ -1,6 +1,7 @@
 import { EventTarget, defineEventAttribute } from 'event-target-shim/index';
 import { NativeModules } from 'react-native';
-
+import TrackDataEvent from './TrackDataEvent';
+import { addListener, removeListener } from './EventEmitter';
 import MediaStreamTrack, { MediaStreamTrackInfo } from './MediaStreamTrack';
 import MediaStreamTrackEvent from './MediaStreamTrackEvent';
 import { uniqueID } from './RTCUtil';
@@ -10,6 +11,8 @@ const { WebRTCModule } = NativeModules;
 type MediaStreamEventMap = {
     addtrack: MediaStreamTrackEvent<'addtrack'>
     removetrack: MediaStreamTrackEvent<'removetrack'>
+    audio: TrackDataEvent<'audio'>;
+    video: TrackDataEvent<'video'>;
 }
 
 export default class MediaStream extends EventTarget<MediaStreamEventMap> {
@@ -52,6 +55,15 @@ export default class MediaStream extends EventTarget<MediaStreamEventMap> {
         // recommendation for id generation i.e. uses UUID which is unique enough
         // for the purposes of reactTag.
         this._reactTag = this._id;
+        addListener(this, 'mediaStreamData', (ev: any) => {
+            if (ev.streamId !== this._id) {
+                return;
+            }
+            let type = ev.type;
+            let data = ev.data;
+            //console.log('mediaStreamData', type, data);
+            this.dispatchEvent(new TrackDataEvent(type, {data}));
+        });
 
         if (typeof arg === 'undefined') {
             WebRTCModule.mediaStreamCreate(this.id);
@@ -129,6 +141,17 @@ export default class MediaStream extends EventTarget<MediaStreamEventMap> {
         return this._tracks.filter(track => track.kind === 'video');
     }
 
+    startRecord(path: String, cb?:Number) : Promise<boolean> {
+        if(!WebRTCModule.mediaStreamStartRecord) Promise.resolve(false);
+        if(!cb) cb = 0;
+        return WebRTCModule.mediaStreamStartRecord(this._reactTag, path, cb);
+    }
+
+    stopRecord() : Promise<boolean> {
+        if(!WebRTCModule.mediaStreamStopRecord) Promise.resolve(false);
+        return WebRTCModule.mediaStreamStopRecord(this._reactTag);
+    }
+
     clone(): never {
         throw new Error('Not implemented.');
     }
@@ -139,7 +162,8 @@ export default class MediaStream extends EventTarget<MediaStreamEventMap> {
 
     release(releaseTracks = true): void {
         const tracks = [ ...this._tracks ];
-
+        removeListener(this);
+        this.stopRecord();
         for (const track of tracks) {
             this.removeTrack(track);
 
@@ -156,6 +180,7 @@ export default class MediaStream extends EventTarget<MediaStreamEventMap> {
  * Define the `onxxx` event handlers.
  */
 const proto = MediaStream.prototype;
-
+defineEventAttribute(proto, 'audio');
+defineEventAttribute(proto, 'video');
 defineEventAttribute(proto, 'addtrack');
 defineEventAttribute(proto, 'removetrack');

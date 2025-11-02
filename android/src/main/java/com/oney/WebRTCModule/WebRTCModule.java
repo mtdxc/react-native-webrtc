@@ -31,6 +31,10 @@ import org.webrtc.Logging;
 import org.webrtc.audio.AudioDeviceModule;
 import org.webrtc.audio.JavaAudioDeviceModule;
 
+import android.util.Base64;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.ShortBuffer;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -826,6 +830,7 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
     @ReactMethod
     public void mediaStreamRemoveTrack(String streamId, int pcId, String trackId) {
         ThreadUtils.runOnExecutor(() -> {
+            renderMap.remove(trackId);
             MediaStream stream = localStreams.get(streamId);
             if (stream == null) {
                 Log.d(TAG, "mediaStreamRemoveTrack() could not find stream " + streamId);
@@ -856,6 +861,7 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
                 return;
             }
             localStreams.remove(id);
+            stream.stopRecord();
             stream.dispose();
         });
     }
@@ -868,6 +874,7 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
                 Log.d(TAG, "mediaStreamTrackRelease() track is null");
                 return;
             }
+            track.stopRecord();
             track.setEnabled(false);
             getUserMediaImpl.disposeTrack(id);
         });
@@ -917,6 +924,195 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
             }
 
             ((AudioTrack) track).setVolume(volume);
+        });
+    }
+
+    @ReactMethod
+    public void mediaStreamStartRecord(String id, String path, int ncb, Promise cb) {
+        MediaStream stream = getStreamForReactTag(id);
+        if (stream == null) {
+            Log.d(TAG, "mediaStreamStartRecord() could not find stream " + id);
+            cb.reject(new Exception("stream not found"));
+            return;
+        }
+        boolean ret = stream.startRecord(path);
+        if (ret && ncb!=0) {
+            stream.setRecordSink(new MyAudioRender(id, -1, true));
+        }
+        cb.resolve(ret);
+    }
+
+    @ReactMethod
+    public void mediaStreamStopRecord(String id, Promise cb) {
+        MediaStream stream = getStreamForReactTag(id);
+        if (stream == null) {
+            Log.d(TAG, "mediaStreamStopRecord() could not find stream " + id);
+            cb.reject(new Exception("stream not found"));
+            return;
+        }
+
+        cb.resolve(stream.stopRecord());
+    }
+
+    public class MyAudioRender implements AudioTrackSink, RecordSink {
+        private WritableMap dict = Arguments.createMap();
+        private int type = 0;
+        private int size = 0;
+        public void setupData(int type, int size) {
+            this.type = type;
+            this.size = size;
+        }
+        private short[] pcm = null;
+        private int pos = 0;
+        private boolean stream;
+        MyAudioRender(String id, int pcId, boolean stream) {
+            this.stream = stream;
+            dict.putString(stream?"streamId":"trackId", id);
+            dict.putInt("pcId", pcId);
+        }
+        String eventName() {return stream?"mediaStreamData":"mediaStreamTrackData";}
+        @Override
+        public void onAudioData(byte[] buff, long tsp) {
+            WritableMap params = dict.copy();
+            params.putString("data", Base64.encodeToString(buff, Base64.DEFAULT));
+            params.putInt("tsp", (int)tsp);
+            params.putString("type", "audio");
+            sendEvent(eventName(), params);
+        }
+        @Override
+        public void onVideoData(byte[] buff, long tsp){
+            WritableMap params = dict.copy();
+            params.putString("data", Base64.encodeToString(buff, Base64.DEFAULT));
+            params.putInt("tsp", (int)tsp);
+            params.putString("type", "video");
+            sendEvent(eventName(), params);
+        }
+        @Override
+        public void onData(ByteBuffer byteBuffer, int bits, int samplerate, int channel, int samples, long tsp) {
+            ShortBuffer sb = byteBuffer.order(ByteOrder.LITTLE_ENDIAN).asShortBuffer();
+            if (samples < size) {
+                if (pcm == null) {
+                    pcm = new short[(samples + size) * channel];
+                    pos = 0;
+                }
+                sb.get(pcm, pos * channel, samples * channel);
+                pos += samples;
+                int i = 0;
+                while (pos > i + size) {
+                    onData(ShortBuffer.wrap(pcm, i * channel, size * channel), samplerate, channel, size, tsp);
+                    i += size;
+                }
+                if (i>0) {
+                   pos -= i;
+                   for (int k=0; k<pos; k++) {
+                       int dst = k * channel;
+                       int src = (i + k) * channel;
+                       for (int j = 0; j<channel; j++) {
+                           pcm[dst + j] = pcm[src + j];
+                       }
+                   }
+                }
+                return ;
+            }
+            onData(sb, samplerate, channel, samples, tsp);
+        }
+
+        public void onData(ShortBuffer sb, int samplerate, int channel, int samples, long tsp) {
+            WritableMap params = dict.copy();
+            if (type == 1) {
+                ByteBuffer byteBuffer = ByteBuffer.allocate(sb.remaining() * 2);
+                while (sb.hasRemaining()) {
+                    byteBuffer.putShort(sb.get());
+                }
+                params.putString( "data", Base64.encodeToString(byteBuffer.array(), Base64.DEFAULT));
+            }
+            else{
+                // ByteBuffer默认是大端排序的，这里要用小段方式取short类型
+                int n = samples * channel;
+                WritableArray array = Arguments.createArray();
+                for (int i = 0; i< n; i++) {
+                    if (type == 2)
+                        array.pushInt(sb.get());
+                    if (type == 3)
+                        array.pushDouble(sb.get()/32768.0);
+                }
+                params.putArray("data", array);
+            }
+            params.putInt("samplerate", samplerate);
+            params.putInt("channel", channel);
+            params.putInt("samples", samples);
+            params.putString("type", "data");
+            sendEvent(eventName(), params);
+        }
+        public void onTextOut(String var) {
+            WritableMap params = dict.copy();
+            params.putString("data", var);
+            params.putString("type", "text");
+            sendEvent(eventName(), params);
+        }
+    }
+
+    private Map<String, MyAudioRender> renderMap = new HashMap<>();
+    private MyAudioRender getRender(int pcId, String id) {
+        MyAudioRender render = renderMap.get(id);
+        if (render == null) {
+            render = new MyAudioRender(id, pcId, false);
+            renderMap.put(id, render);
+        }
+        return render;
+    }
+    @ReactMethod
+    public void mediaStreamTrackMonitorData(int pcId, String id, int type, int size, Promise cb) {
+        ThreadUtils.runOnExecutor(() -> {
+            MediaStreamTrack track = getTrack(pcId, id);
+            if (track == null) {
+                Log.d(TAG, "mediaStreamTrackMonitorData() could not find track " + id);
+                cb.reject(new Exception("track not found"));
+                return;
+            }
+            boolean ret = false;
+            if (track instanceof AudioTrack) {
+                ret = true;
+                AudioTrack audio = (AudioTrack)track;
+                MyAudioRender render = getRender(pcId, id);
+                render.setupData(type, size);
+                if (type!=0) {
+                    audio.addSink(render);
+                } else {
+                    audio.removeSink(render);
+                }
+            }
+            cb.resolve(ret);
+        });
+    }
+
+    @ReactMethod
+    public void mediaStreamTrackStartRecord(int pcId, String id, String path, int cbdata, Promise cb) {
+        ThreadUtils.runOnExecutor(() -> {
+            MediaStreamTrack track = getTrack(pcId, id);
+            if (track == null) {
+                Log.d(TAG, "mediaStreamTrackStartRecord() could not find track " + id);
+                cb.reject(new Exception("track not found"));
+                return;
+            }
+            boolean ret = track.startRecord(path);
+            if (ret && cbdata!=0) {
+                track.setRecordSink(new MyAudioRender(id, pcId, false));
+            }
+            cb.resolve(ret);
+        });
+    }
+    @ReactMethod
+    public void mediaStreamTrackStopRecord(int pcId, String id, Promise cb) {
+        ThreadUtils.runOnExecutor(() -> {
+            MediaStreamTrack track = getTrack(pcId, id);
+            if (track == null) {
+                Log.d(TAG, "mediaStreamTrackStopRecord() could not find track " + id);
+                cb.reject(new Exception("track not found"));
+                return;
+            }
+
+            cb.resolve(track.stopRecord());
         });
     }
 

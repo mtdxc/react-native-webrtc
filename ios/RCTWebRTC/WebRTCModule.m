@@ -154,6 +154,8 @@ RCT_EXPORT_MODULE();
         kEventDataChannelStateChanged,
         kEventDataChannelReceiveMessage,
         kEventMediaStreamTrackMuteChanged,
+        kEventMediaStreamData,
+        kEventMediaStreamTrackData,
         kEventMediaStreamTrackEnded,
         kEventPeerConnectionOnRemoveTrack,
         kEventPeerConnectionOnTrack

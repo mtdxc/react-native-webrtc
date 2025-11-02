@@ -13,4 +13,11 @@
     objc_setAssociatedObject(self, @selector(captureController), captureController, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
+- (StreamTrackRender*)audioRender {
+  return objc_getAssociatedObject(self, @selector(audioRender));
+}
+
+- (void)setAudioRender:(StreamTrackRender *)audioRender {
+    objc_setAssociatedObject(self, @selector(audioRender), audioRender, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
 @end
