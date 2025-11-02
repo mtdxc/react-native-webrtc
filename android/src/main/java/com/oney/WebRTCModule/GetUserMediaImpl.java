@@ -263,7 +263,7 @@ class GetUserMediaImpl {
         }
     }
 
-    void getDisplayMedia(Promise promise) {
+    void getDisplayMedia(final ReadableMap constraints, Promise promise) {
         if (this.displayMediaPromise != null) {
             promise.reject(new RuntimeException("Another operation is pending."));
             return;

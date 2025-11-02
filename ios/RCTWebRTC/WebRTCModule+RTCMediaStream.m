@@ -1,3 +1,4 @@
+#include <Foundation/Foundation.h>
 #import <objc/runtime.h>
 
 #import <WebRTC/RTCCameraVideoCapturer.h>
@@ -10,6 +11,7 @@
 #import "WebRTCModule+RTCPeerConnection.h"
 #import "WebRTCModuleOptions.h"
 
+#import "FlutterRPScreenRecorder.h"
 #import "ProcessorProvider.h"
 #import "ScreenCaptureController.h"
 #import "ScreenCapturer.h"
@@ -254,7 +256,7 @@
 #endif
 }
 
-- (RTCVideoTrack *)createScreenCaptureVideoTrack {
+- (RTCVideoTrack *)createScreenCaptureVideoTrack:(BOOL) local {
 #if TARGET_IPHONE_SIMULATOR || TARGET_OS_OSX || TARGET_OS_TV
     return nil;
 #endif
@@ -263,27 +265,41 @@
 
     NSString *trackUUID = [[NSUUID UUID] UUIDString];
     RTCVideoTrack *videoTrack = [self.peerConnectionFactory videoTrackWithSource:videoSource trackId:trackUUID];
-
-    ScreenCapturer *screenCapturer = [[ScreenCapturer alloc] initWithDelegate:videoSource];
-    ScreenCaptureController *screenCaptureController =
-        [[ScreenCaptureController alloc] initWithCapturer:screenCapturer];
-
     TrackCapturerEventsEmitter *emitter = [[TrackCapturerEventsEmitter alloc] initWith:trackUUID webRTCModule:self];
-    screenCaptureController.eventsDelegate = emitter;
-    videoTrack.captureController = screenCaptureController;
-    [screenCaptureController startCapture];
-
+    if (local) {
+      FlutterRPScreenRecorder* localCapturer = [[FlutterRPScreenRecorder alloc] initWithDelegate:videoSource];
+      RPScreenCaptureController *screenCaptureController =
+          [[RPScreenCaptureController alloc] initWithCapturer:localCapturer];
+      screenCaptureController.eventsDelegate = emitter;
+      videoTrack.captureController = screenCaptureController;
+      [localCapturer startCapture];
+    }
+    else{
+      ScreenCapturer *screenCapturer = [[ScreenCapturer alloc] initWithDelegate:videoSource];
+      ScreenCaptureController *screenCaptureController =
+          [[ScreenCaptureController alloc] initWithCapturer:screenCapturer];
+      screenCaptureController.eventsDelegate = emitter;
+      videoTrack.captureController = screenCaptureController;
+      [screenCaptureController startCapture];
+    }
     return videoTrack;
 }
 
-RCT_EXPORT_METHOD(getDisplayMedia : (RCTPromiseResolveBlock)resolve rejecter : (RCTPromiseRejectBlock)reject) {
+RCT_EXPORT_METHOD(getDisplayMedia : (NSDictionary*)constraints
+                  resolve  : (RCTPromiseResolveBlock)resolve
+                  rejecter : (RCTPromiseRejectBlock)reject) {
 #if TARGET_OS_TV
     reject(@"unsupported_platform", @"tvOS is not supported", nil);
     return;
 #else
+    BOOL useBroadcastExtension = false;
+    id videoConstraints = constraints[@"video"];
+    if ([videoConstraints isKindOfClass:[NSDictionary class]]) {
+      // constraints.video.deviceId
+      useBroadcastExtension = [((NSDictionary*)videoConstraints)[@"deviceId"] hasPrefix:@"broadcast"];
+    }
 
-    RTCVideoTrack *videoTrack = [self createScreenCaptureVideoTrack];
-
+    RTCVideoTrack *videoTrack = [self createScreenCaptureVideoTrack:!useBroadcastExtension];
     if (videoTrack == nil) {
         reject(@"DOMException", @"AbortError", nil);
         return;
@@ -316,8 +332,10 @@ RCT_EXPORT_METHOD(getDisplayMedia : (RCTPromiseResolveBlock)resolve rejecter : (
  * if audio permission was not granted, there will be no "audio" key in
  * the constraints dictionary.
  */
-RCT_EXPORT_METHOD(getUserMedia : (NSDictionary *)constraints successCallback : (RCTResponseSenderBlock)
-                      successCallback errorCallback : (RCTResponseSenderBlock)errorCallback) {
+RCT_EXPORT_METHOD(getUserMedia
+                  : (NSDictionary *)constraints
+                  : (RCTResponseSenderBlock)successCallback
+                  : (RCTResponseSenderBlock)errorCallback) {
 #if TARGET_OS_TV
     errorCallback(@[ @"PlatformNotSupported", @"getUserMedia is not supported on tvOS." ]);
     return;
@@ -425,7 +443,7 @@ RCT_EXPORT_METHOD(enumerateDevices : (RCTResponseSenderBlock)callback) {
         [devices addObject:@{
             @"facing" : position,
             @"deviceId" : device.uniqueID,
-            @"groupId" : @"",
+            @"groupId" : device.deviceType,
             @"label" : label,
             @"kind" : @"videoinput",
         }];
