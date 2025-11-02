@@ -90,7 +90,11 @@
               aslLevel = RTCLoggingSeverityError;
               break;
           }
-          RTCLogFile(fileName.UTF8String, lineNumber.integerValue, aslLevel, "react", message.UTF8String);
+          if (fileName && lineNumber) {
+            RTCLogFile(fileName.UTF8String, lineNumber.integerValue, aslLevel, "react", message.UTF8String);
+          } else {
+            RTCLogOut(aslLevel, "react", message.UTF8String);
+          }
         });
 #endif
         if (encoderFactory == nil) {
