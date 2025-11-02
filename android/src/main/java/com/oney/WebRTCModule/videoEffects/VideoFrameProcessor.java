@@ -16,4 +16,6 @@ public interface VideoFrameProcessor {
      * @return processed videoframe which will rendered
      */
     public VideoFrame process(VideoFrame frame, SurfaceTextureHelper textureHelper);
+    public boolean setProperty(String name, String value);
+    public String getProperty(String name);
 }

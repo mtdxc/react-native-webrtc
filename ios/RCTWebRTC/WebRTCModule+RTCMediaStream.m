@@ -15,6 +15,7 @@
 #import "ScreenCapturer.h"
 #import "TrackCapturerEventsEmitter.h"
 #import "VideoCaptureController.h"
+#import "RTCBeautyFilter.h"
 
 @implementation WebRTCModule (RTCMediaStream)
 
@@ -36,7 +37,7 @@
  * {@code RTCAudioTrack} instance is to satisfy.
  */
 - (RTCAudioTrack *)createAudioTrack:(NSDictionary *)constraints {
-    NSString *trackId = [[NSUUID UUID] UUIDString];
+  NSString *trackId = [[NSUUID UUID] UUIDString];
     RTCAudioTrack *audioTrack = [self.peerConnectionFactory audioTrackWithTrackId:trackId];
     return audioTrack;
 }
@@ -61,6 +62,7 @@
     return videoTrack;
 #endif
 }
+
 /**
  * Initializes a new {@link RTCMediaTrack} with the given tracks.
  *
@@ -426,7 +428,7 @@ RCT_EXPORT_METHOD(mediaStreamTrackApplyConstraints : (nonnull NSString *)trackID
     RTCMediaStreamTrack *track = self.localTracks[trackID];
     if (track) {
         if ([track.kind isEqualToString:@"video"]) {
-            RTCVideoTrack *videoTrack = (RTCVideoTrack *)track;
+        RTCVideoTrack *videoTrack = (RTCVideoTrack *)track;
             if ([videoTrack.captureController isKindOfClass:[CaptureController class]]) {
                 CaptureController *vcc = (CaptureController *)videoTrack.captureController;
                 NSError *error = nil;
@@ -480,6 +482,68 @@ RCT_EXPORT_METHOD(mediaStreamTrackSetVideoEffects : (nonnull NSString *)trackID 
     RTCVideoCapturer *capturer = vcc.capturer;
 
     capturer.delegate = self.videoEffectProcessor;
+}
+
+RCT_EXPORT_METHOD(mediaStreamTrackSetVideoEffectProperty : (nonnull NSString *)trackID
+                  name :(NSString*) name
+                  value :(NSString*) value
+                  index :(int) index
+                  resolve : (RCTPromiseResolveBlock)resolve
+                  reject  : (RCTPromiseRejectBlock)reject) {
+  RTCMediaStreamTrack *track = self.localTracks[trackID];
+  if (track == nil) {
+      reject(@"400", @"no such track", nil);
+      return ;
+  }
+  RTCVideoTrack *videoTrack = (RTCVideoTrack *)track;
+  VideoCaptureController *vcc = (VideoCaptureController *)videoTrack.captureController;
+  VideoEffectProcessor* pcs = vcc.capturer.delegate;
+  BOOL ret = false;
+  if (index < 0 || index >= pcs.videoFrameProcessors.count) {
+    for (id<VideoFrameProcessorDelegate> process in pcs.videoFrameProcessors) {
+      if([process setProperty:name value:value]) {
+        ret = true;
+        break;
+      }
+    }
+  } else {
+    id<VideoFrameProcessorDelegate> process = [pcs.videoFrameProcessors objectAtIndex:index];
+    if (process) {
+      ret = [process setProperty:name value:value];
+    }
+  }
+  RCTLogInfo(@"setVideoEffectProperty %@ %@ %@ %d return %d", trackID, name, value, index, ret);
+  resolve([NSNumber numberWithBool:ret]);
+}
+
+RCT_EXPORT_METHOD(mediaStreamTrackGetVideoEffectProperty : (nonnull NSString *)trackID
+                  name :(NSString*) name
+                  index :(int) index
+                  resolve : (RCTPromiseResolveBlock)resolve
+                  reject  : (RCTPromiseRejectBlock)reject) {
+  RTCMediaStreamTrack *track = self.localTracks[trackID];
+  if (track == nil) {
+      reject(@"400", @"no such track", nil);
+      return ;
+  }
+  RTCVideoTrack *videoTrack = (RTCVideoTrack *)track;
+  VideoCaptureController *vcc = (VideoCaptureController *)videoTrack.captureController;
+  VideoEffectProcessor* pcs = vcc.capturer.delegate;
+  NSString* ret = nil;
+  if (index < 0 || index >= pcs.videoFrameProcessors.count) {
+    for (id<VideoFrameProcessorDelegate> process in pcs.videoFrameProcessors) {
+      ret = [process getProperty:name];
+      if(ret) {
+        break;
+      }
+    }
+  } else {
+    id<VideoFrameProcessorDelegate> process = [pcs.videoFrameProcessors objectAtIndex:index];
+    if (process) {
+      ret = [process getProperty:name];
+    }
+  }
+  resolve(ret);
 }
 
 #pragma mark - Helpers

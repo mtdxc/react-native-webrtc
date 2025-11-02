@@ -5,7 +5,9 @@ import org.webrtc.VideoFrame;
 import org.webrtc.VideoProcessor;
 import org.webrtc.VideoSink;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Lightweight abstraction for an object that can receive video frames, process and add effects in
@@ -14,11 +16,53 @@ import java.util.List;
 public class VideoEffectProcessor implements VideoProcessor {
     private VideoSink mSink;
     final private SurfaceTextureHelper textureHelper;
-    final private List<VideoFrameProcessor> videoFrameProcessors;
-
-    public VideoEffectProcessor(List<VideoFrameProcessor> processors, SurfaceTextureHelper textureHelper) {
+    private ArrayList<VideoFrameProcessor> videoFrameProcessors;
+    public VideoEffectProcessor(SurfaceTextureHelper textureHelper) {
         this.textureHelper = textureHelper;
-        this.videoFrameProcessors = processors;
+        this.videoFrameProcessors = new ArrayList<>();
+    }
+
+    public int getProcessCount() {return videoFrameProcessors.size();}
+    public VideoFrameProcessor getProcess(int index) {return videoFrameProcessors.get(index);}
+    public void clearProcess() {videoFrameProcessors.clear();}
+    public int addProcess(VideoFrameProcessor pcs) {
+        if(pcs!=null)
+            videoFrameProcessors.add(pcs);
+        return videoFrameProcessors.size();
+    }
+
+    public boolean setProperty(String name, String value, int pcsIdx) {
+        if (pcsIdx < 0 || pcsIdx >= videoFrameProcessors.size()) {
+           for (VideoFrameProcessor pcs : videoFrameProcessors) {
+               if (pcs.setProperty(name, value)) {
+                   return true;
+               }
+           }
+        }
+        else{
+            VideoFrameProcessor pcs = videoFrameProcessors.get(pcsIdx);
+            if(pcs != null)
+                return pcs.setProperty(name, value);
+        }
+        return false;
+    }
+
+    public String getProperty(String name, int pcsIdx) {
+        String ret = null;
+        if (pcsIdx < 0 || pcsIdx >= videoFrameProcessors.size()) {
+            for (VideoFrameProcessor pcs : videoFrameProcessors) {
+                ret = pcs.getProperty(name);
+                if (ret!=null) {
+                    return ret;
+                }
+            }
+        }
+        else{
+            VideoFrameProcessor pcs = videoFrameProcessors.get(pcsIdx);
+            if(pcs != null)
+                ret = pcs.getProperty(name);
+        }
+        return ret;
     }
 
     @Override
@@ -53,7 +97,9 @@ public class VideoEffectProcessor implements VideoProcessor {
         }
 
         mSink.onFrame(outputFrame);
-        outputFrame.release();
+        if (outputFrame != frame) {
+            outputFrame.release();
+        }
         frame.release();
     }
 }

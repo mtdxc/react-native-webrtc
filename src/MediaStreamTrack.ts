@@ -143,6 +143,26 @@ export default class MediaStreamTrack extends EventTarget<MediaStreamTrackEventM
         this._setVideoEffects([ name ]);
     }
 
+    _setVideoEffectProperty(name: string, value: string, index = -1) : Promise<boolean> {
+        if (this.remote) {
+            throw new Error('Not implemented for remote tracks');
+        }
+
+        if (this.kind !== 'video') {
+            throw new Error('Only implemented for video tracks');
+        }
+        return WebRTCModule.mediaStreamTrackSetVideoEffectProperty(this.id, name, value, index);
+    }
+    _getVideoEffectProperty(name: string, index = -1) : Promise<string> {
+        if (this.remote) {
+            throw new Error('Not implemented for remote tracks');
+        }
+
+        if (this.kind !== 'video') {
+            throw new Error('Only implemented for video tracks');
+        }
+        return WebRTCModule.mediaStreamTrackGetVideoEffectProperty(this.id, name, index);
+    } 
     /**
      * Internal function which is used to set the muted state on remote tracks and
      * emit the mute / unmute event.

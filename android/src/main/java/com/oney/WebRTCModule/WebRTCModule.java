@@ -19,12 +19,15 @@ import com.facebook.react.bridge.ReadableMapKeySetIterator;
 import com.facebook.react.bridge.ReadableType;
 import com.facebook.react.bridge.WritableArray;
 import com.facebook.react.bridge.WritableMap;
+import com.facebook.react.bridge.WritableNativeArray;
 import com.facebook.react.module.annotations.ReactModule;
 import com.facebook.react.modules.core.DeviceEventManagerModule;
 import com.oney.WebRTCModule.webrtcutils.H264AndSoftwareVideoDecoderFactory;
 import com.oney.WebRTCModule.webrtcutils.H264AndSoftwareVideoEncoderFactory;
+import com.pixpark.gpupixel.GPUPixel;
 
 import org.webrtc.*;
+import org.webrtc.Logging;
 import org.webrtc.audio.AudioDeviceModule;
 import org.webrtc.audio.JavaAudioDeviceModule;
 
@@ -40,10 +43,10 @@ import java.util.concurrent.ExecutionException;
 public class WebRTCModule extends ReactContextBaseJavaModule {
     static final String TAG = WebRTCModule.class.getCanonicalName();
 
-    PeerConnectionFactory mFactory;
-    VideoEncoderFactory mVideoEncoderFactory;
-    VideoDecoderFactory mVideoDecoderFactory;
-    AudioDeviceModule mAudioDeviceModule;
+    static PeerConnectionFactory mFactory;
+    static VideoEncoderFactory mVideoEncoderFactory;
+    static VideoDecoderFactory mVideoDecoderFactory;
+    static AudioDeviceModule mAudioDeviceModule;
 
     // Need to expose the peer connection codec factories here to get capabilities
     private final SparseArray<PeerConnectionObserver> mPeerConnectionObservers;
@@ -71,46 +74,51 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
                         .setNativeLibraryLoader(new LibraryLoader())
                         .setInjectableLogger(injectableLogger, loggingSeverity)
                         .createInitializationOptions());
-
+        int logLevel = 1;
         if (injectableLogger == null && loggingSeverity != null) {
             Logging.enableLogToDebugOutput(loggingSeverity);
+            logLevel = loggingSeverity.ordinal();
         }
+        Logging.InitLog(reactContext.getFilesDir().getAbsolutePath(), logLevel, 8);
+        if (mFactory == null) {
+            if (encoderFactory == null || decoderFactory == null) {
+                // Initialize EGL context required for HW acceleration.
+                EglBase.Context eglContext = EglUtils.getRootEglBaseContext();
 
-        if (encoderFactory == null || decoderFactory == null) {
-            // Initialize EGL context required for HW acceleration.
-            EglBase.Context eglContext = EglUtils.getRootEglBaseContext();
-
-            if (eglContext != null) {
-                encoderFactory = new H264AndSoftwareVideoEncoderFactory(eglContext);
-                decoderFactory = new H264AndSoftwareVideoDecoderFactory(eglContext);
-            } else {
-                encoderFactory = new SoftwareVideoEncoderFactory();
-                decoderFactory = new SoftwareVideoDecoderFactory();
+                if (eglContext != null) {
+                    encoderFactory = new H264AndSoftwareVideoEncoderFactory(eglContext);
+                    decoderFactory = new H264AndSoftwareVideoDecoderFactory(eglContext);
+                } else {
+                    encoderFactory = new SoftwareVideoEncoderFactory();
+                    decoderFactory = new SoftwareVideoDecoderFactory();
+                }
             }
+
+            if (adm == null) {
+                adm = JavaAudioDeviceModule.builder(reactContext).setEnableVolumeLogger(false).createAudioDeviceModule();
+            }
+
+            Log.d(TAG, "Using video encoder factory: " + encoderFactory.getClass().getCanonicalName());
+            Log.d(TAG, "Using video decoder factory: " + decoderFactory.getClass().getCanonicalName());
+
+            mFactory = PeerConnectionFactory.builder()
+                    .setAudioDeviceModule(adm)
+                    .setVideoEncoderFactory(encoderFactory)
+                    .setVideoDecoderFactory(decoderFactory)
+                    .createPeerConnectionFactory();
+
+            // PeerConnectionFactory now owns the adm native pointer, and we don't need it anymore.
+            adm.release();
+
+            // Saving the encoder and decoder factories to get codec info later when needed.
+            mVideoEncoderFactory = encoderFactory;
+            mVideoDecoderFactory = decoderFactory;
+            mAudioDeviceModule = adm;
         }
-
-        if (adm == null) {
-            adm = JavaAudioDeviceModule.builder(reactContext).setEnableVolumeLogger(false).createAudioDeviceModule();
-        }
-
-        Log.d(TAG, "Using video encoder factory: " + encoderFactory.getClass().getCanonicalName());
-        Log.d(TAG, "Using video decoder factory: " + decoderFactory.getClass().getCanonicalName());
-
-        mFactory = PeerConnectionFactory.builder()
-                           .setAudioDeviceModule(adm)
-                           .setVideoEncoderFactory(encoderFactory)
-                           .setVideoDecoderFactory(decoderFactory)
-                           .createPeerConnectionFactory();
-
-        // PeerConnectionFactory now owns the adm native pointer, and we don't need it anymore.
-        adm.release();
-
-        // Saving the encoder and decoder factories to get codec info later when needed.
-        mVideoEncoderFactory = encoderFactory;
-        mVideoDecoderFactory = decoderFactory;
-        mAudioDeviceModule = adm;
 
         getUserMediaImpl = new GetUserMediaImpl(this, reactContext);
+        // init for GpuPixel
+        GPUPixel.Init(reactContext);
     }
 
     @NonNull
@@ -944,6 +952,14 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
     public void mediaStreamTrackSetVideoEffects(String id, ReadableArray names) {
         ThreadUtils.runOnExecutor(() -> { getUserMediaImpl.setVideoEffects(id, names); });
     }
+    @ReactMethod
+    public void mediaStreamTrackSetVideoEffectProperty(String id, String name, String val, int index, Promise promise) {
+        ThreadUtils.runOnExecutor(() -> { getUserMediaImpl.setVideoEffectProperty(id, name, val, index, promise); });
+    }
+    @ReactMethod
+    public void mediaStreamTrackGetVideoEffectProperty(String id, String name, int index, Promise promise) {
+        ThreadUtils.runOnExecutor(() -> {getUserMediaImpl.getVideoEffectProperty(id, name, index, promise);});
+    }
 
     @ReactMethod
     public void peerConnectionSetConfiguration(ReadableMap configuration, int id) {
@@ -1284,7 +1300,7 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
                     candidateMap.hasKey("sdpMLineIndex") && !candidateMap.isNull("sdpMLineIndex")
                             ? candidateMap.getInt("sdpMLineIndex")
                             : 0,
-                    candidateMap.getString("candidate"));
+                candidateMap.getString("candidate"));
 
             peerConnection.addIceCandidate(candidate, new AddIceObserver() {
                 @Override

@@ -6,10 +6,13 @@
 #import <React/RCTEventDispatcher.h>
 #import <React/RCTLog.h>
 #import <React/RCTUtils.h>
-
+#import <WebRTC/RTCLogging.h>
 #import "WebRTCModule+RTCPeerConnection.h"
 #import "WebRTCModule.h"
 #import "WebRTCModuleOptions.h"
+#import "RotateVideoProcessor.h"
+#import "ProcessorProvider.h"
+#import "RTCBeautyFilter.h"
 
 @interface WebRTCModule ()
 @end
@@ -56,7 +59,40 @@
 
         // Initialize logging.
         RTCSetMinDebugLogLevel(loggingSeverity);
-
+        NSString* writeDir = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+        RTCInitLog(writeDir.UTF8String, loggingSeverity, 8);
+        [ProcessorProvider addProcessor:^{return [[RotateVideoProcessor alloc] init];} forName:@"rotate"];
+        [ProcessorProvider addProcessor:^{return [[RTCBeautyFilter alloc] init:FALSE];} forName:@"gpupixel"];
+        [ProcessorProvider addProcessor:^{return [[RTCBeautyFilter alloc] init:TRUE]; } forName:@"gpupixel_lite"];
+#if 1
+        RCTSetLogThreshold((RCTLogLevel)loggingSeverity);
+        RCTSetLogFunction(^( RCTLogLevel level,
+                             __unused RCTLogSource source,
+                             NSString *fileName,
+                             NSNumber *lineNumber,
+                             NSString *message)
+        {
+          int aslLevel;
+          switch(level) {
+            case RCTLogLevelTrace:
+              aslLevel = RTCLoggingSeverityVerbose;
+              break;
+            case RCTLogLevelInfo:
+              aslLevel = RTCLoggingSeverityInfo;
+              break;
+            case RCTLogLevelWarning:
+              aslLevel = RTCLoggingSeverityWarning;
+              break;
+            case RCTLogLevelError:
+              aslLevel = RTCLoggingSeverityError;
+              break;
+            case RCTLogLevelFatal:
+              aslLevel = RTCLoggingSeverityError;
+              break;
+          }
+          RTCLogFile(fileName.UTF8String, lineNumber.integerValue, aslLevel, "react", message.UTF8String);
+        });
+#endif
         if (encoderFactory == nil) {
             encoderFactory = [[RTCDefaultVideoEncoderFactory alloc] init];
         }

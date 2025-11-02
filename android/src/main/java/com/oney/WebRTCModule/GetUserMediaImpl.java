@@ -19,7 +19,10 @@ import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.UiThreadUtil;
 import com.facebook.react.bridge.WritableArray;
 import com.facebook.react.bridge.WritableMap;
+import com.oney.WebRTCModule.videoEffects.GpuPixelProcessorFactory;
+import com.oney.WebRTCModule.videoEffects.GpuPixelVideoProcessor;
 import com.oney.WebRTCModule.videoEffects.ProcessorProvider;
+import com.oney.WebRTCModule.videoEffects.RotateFrameProcessorFactory;
 import com.oney.WebRTCModule.videoEffects.VideoEffectProcessor;
 import com.oney.WebRTCModule.videoEffects.VideoFrameProcessor;
 
@@ -63,7 +66,9 @@ class GetUserMediaImpl {
     GetUserMediaImpl(WebRTCModule webRTCModule, ReactApplicationContext reactContext) {
         this.webRTCModule = webRTCModule;
         this.reactContext = reactContext;
-
+        ProcessorProvider.addProcessor("gpupixel", new GpuPixelProcessorFactory(false));
+        ProcessorProvider.addProcessor("gpupixel_lite", new GpuPixelProcessorFactory(true));
+        ProcessorProvider.addProcessor("rotate", new RotateFrameProcessorFactory());
         reactContext.addActivityEventListener(new BaseActivityEventListener() {
             @Override
             public void onActivityResult(Activity activity, int requestCode, int resultCode, Intent data) {
@@ -419,32 +424,60 @@ class GetUserMediaImpl {
         if (track != null && track.videoCaptureController instanceof CameraCaptureController) {
             VideoSource videoSource = (VideoSource) track.mediaSource;
             SurfaceTextureHelper surfaceTextureHelper = track.surfaceTextureHelper;
-
             if (names != null) {
-                List<VideoFrameProcessor> processors =
-                        names.toArrayList()
-                                .stream()
-                                .filter(name -> name instanceof String)
-                                .map(name -> {
-                                    VideoFrameProcessor videoFrameProcessor =
-                                            ProcessorProvider.getProcessor((String) name);
-                                    if (videoFrameProcessor == null) {
-                                        Log.e(TAG, "no videoFrameProcessor associated with this name: " + name);
-                                    }
-                                    return videoFrameProcessor;
-                                })
-                                .filter(Objects::nonNull)
-                                .collect(Collectors.toList());
-
-                VideoEffectProcessor videoEffectProcessor = new VideoEffectProcessor(processors, surfaceTextureHelper);
-                videoSource.setVideoProcessor(videoEffectProcessor);
-
+                VideoEffectProcessor process = new VideoEffectProcessor(surfaceTextureHelper);
+                for (int i =0; i < names.size(); i++) {
+                    String name = names.getString(i);
+                    VideoFrameProcessor videoFrameProcessor = ProcessorProvider.getProcessor(name);
+                    if (videoFrameProcessor == null) {
+                        Log.e(TAG, "no videoFrameProcessor associated with this name: " + name);
+                        continue;
+                    }
+                    process.addProcess(videoFrameProcessor);
+                }
+                Log.i(TAG, String.format("setVideoProcessor with %d process", process.getProcessCount()));
+                track.process = process;
+                videoSource.setVideoProcessor(process);
             } else {
+                track.process = null;
                 videoSource.setVideoProcessor(null);
             }
         }
     }
 
+    void setVideoEffectProperty(String trackId, String name, String value, int index, Promise cb) {
+        TrackPrivate track = tracks.get(trackId);
+        boolean ret = false;
+        if (track != null && track.process!=null) {
+            ret = track.process.setProperty(name, value, index);
+            Log.i(TAG, String.format("setVideoEffectProperty %s %s %s %d return %b", trackId, name, value, index, ret));
+        }
+        cb.resolve(ret);
+    }
+
+    void getVideoEffectProperty(String trackId, String name, int index, Promise cb) {
+        TrackPrivate track = tracks.get(trackId);
+        String ret = null;
+        if (track != null && track.process!=null) {
+            ret = track.process.getProperty(name, index);
+        }
+        cb.resolve(ret);
+    }
+
+    float[] getFaceLandmarks(String trackId) {
+        float[] ret = null;
+        TrackPrivate track = tracks.get(trackId);
+        if (track!=null && track.process !=null) {
+            for (int i = 0; i < track.process.getProcessCount(); i++) {
+                VideoFrameProcessor pcs = track.process.getProcess(i);
+                if (pcs != null && pcs instanceof GpuPixelVideoProcessor) {
+                    ret = ((GpuPixelVideoProcessor)pcs).getFaceLandmarks();
+                    break;
+                }
+            }
+        }
+        return ret;
+    }
     /**
      * Application/library-specific private members of local
      * {@code MediaStreamTrack}s created by {@code GetUserMediaImpl}.
@@ -456,7 +489,7 @@ class GetUserMediaImpl {
         public final MediaSource mediaSource;
 
         public final MediaStreamTrack track;
-
+        public VideoEffectProcessor process;
         /**
          * The {@code VideoCapturer} from which {@link #mediaSource} was created
          * if {@link #track} is a {@link VideoTrack}.

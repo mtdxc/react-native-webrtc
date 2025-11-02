@@ -2,18 +2,20 @@
 
 @implementation ProcessorProvider
 
-static NSMutableDictionary<NSString *, NSObject<VideoFrameProcessorDelegate> *> *processorMap;
+static NSMutableDictionary<NSString *, VideoFrameProcessorFactory> *processorMap;
 
 + (void)initialize {
     processorMap = [[NSMutableDictionary alloc] init];
 }
 
 + (NSObject<VideoFrameProcessorDelegate> *)getProcessor:(NSString *)name {
-    return [processorMap objectForKey:name];
+  VideoFrameProcessorFactory factory = [processorMap objectForKey:name];
+  if (factory) return factory();
+  return nil;
 }
 
-+ (void)addProcessor:(NSObject<VideoFrameProcessorDelegate> *)processor forName:(NSString *)name {
-    [processorMap setObject:processor forKey:name];
++ (void)addProcessor:(VideoFrameProcessorFactory)facotry forName:(NSString *)name {
+    [processorMap setObject:facotry forKey:name];
 }
 
 + (void)removeProcessor:(NSString *)name {

@@ -5,4 +5,7 @@
 
 - (RTCVideoFrame *)capturer:(RTCVideoCapturer *)capturer didCaptureVideoFrame:(RTCVideoFrame *)frame;
 
+@optional
+- (BOOL) setProperty:(NSString*) name value:(NSString*) value;
+- (NSString*) getProperty:(NSString*) name;
 @end
