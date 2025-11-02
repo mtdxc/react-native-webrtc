@@ -19,6 +19,17 @@
 #import "VideoCaptureController.h"
 #import "RTCBeautyFilter.h"
 
+NSDictionary* normalDict(NSDictionary* dict){
+  if(!dict) return dict;
+  NSMutableDictionary* modify = [dict mutableCopy];
+  for (NSObject* key in dict) {
+    if (![dict[key] isKindOfClass:[NSString class]]) {
+      modify[key] = [NSString stringWithFormat:@"%@", dict[key]];
+    }
+  }
+  return modify;
+}
+
 @interface StreamTrackRender : NSObject<RTCAudioRender, RTCRecordSink>
 -(instancetype)init:(WebRTCModule*) module dict:(NSDictionary*) dict;
 @end
@@ -153,8 +164,20 @@
  */
 - (RTCAudioTrack *)createAudioTrack:(NSDictionary *)constraints {
   NSString *trackId = [[NSUUID UUID] UUIDString];
-    RTCAudioTrack *audioTrack = [self.peerConnectionFactory audioTrackWithTrackId:trackId];
-    return audioTrack;
+  NSObject* audio = constraints[@"audio"];
+  NSLog(@"createAudioTrack %@", audio);
+  if ([audio isKindOfClass:[NSNumber class]]) {
+    return [self.peerConnectionFactory audioTrackWithTrackId:trackId];
+  }
+  else if([audio isKindOfClass:[NSDictionary class]]){
+    NSDictionary* mandatory = normalDict((NSDictionary*)audio);
+    RTCMediaConstraints *audioConstraints = [[RTCMediaConstraints alloc]
+                                              initWithMandatoryConstraints:mandatory
+                                             optionalConstraints:nil];
+    RTCAudioSource* source = [self.peerConnectionFactory audioSourceWithConstraints:audioConstraints];
+    return [self.peerConnectionFactory audioTrackWithSource:source trackId:trackId];
+  }
+  return nil;
 }
 /**
  * Initializes a new {@link RTCVideoTrack} with the given capture controller
@@ -671,6 +694,113 @@ RCT_EXPORT_METHOD(mediaStreamTrackApplyConstraints : (nonnull NSString *)trackID
         reject(@"E_INVALID", @"Could not get track", nil);
     }
 #endif
+}
+
+RCT_EXPORT_METHOD(mediaStreamTrackSetContentHint :(nonnull NSString *)trackID
+                  val :(int) val) {
+#if TARGET_OS_TV
+#else
+    RTCMediaStreamTrack *track = self.localTracks[trackID];
+    if ([track.kind isEqualToString:@"video"]) {
+        RTCVideoTrack *videoTrack = (RTCVideoTrack *)track;
+      videoTrack.contentHint = val;
+    }
+#endif
+}
+
+RCT_EXPORT_METHOD(mediaStreamTrackGetContentHint :(nonnull NSString *)trackID
+                  resolve : (RCTPromiseResolveBlock)resolve
+                  reject  : (RCTPromiseRejectBlock)reject) {
+#if TARGET_OS_TV
+#else
+    RTCMediaStreamTrack *track = self.localTracks[trackID];
+    if ([track.kind isEqualToString:@"video"]) {
+        RTCVideoTrack *videoTrack = (RTCVideoTrack *)track;
+      resolve([NSNumber numberWithInt: videoTrack.contentHint]);
+    }
+#endif
+}
+
+RCT_EXPORT_METHOD(mediaStreamTrackGetFaceLandmarks :(nonnull NSString *)trackID
+                  resolve : (RCTPromiseResolveBlock)resolve
+                  reject  : (RCTPromiseRejectBlock)reject) {
+#if TARGET_OS_TV
+#else
+    NSMutableArray* ary = [NSMutableArray array];
+    RTCMediaStreamTrack *track = self.localTracks[trackID];
+    if ([track.kind isEqualToString:@"video"]) {
+        RTCVideoTrack *videoTrack = (RTCVideoTrack *)track;
+        VideoCaptureController *vcc = (VideoCaptureController *)videoTrack.captureController;
+        VideoEffectProcessor* vpcs = vcc.capturer.delegate;
+        for (id pcs in vpcs.videoFrameProcessors) {
+          if ([pcs isKindOfClass: [RTCBeautyFilter class]]) {
+            RTCBeautyFilter* process = (RTCBeautyFilter*) pcs;
+            if (process) {
+              int size = [process getLandmarkCount];
+              float* landmarks = malloc(size * sizeof(float));
+              [process getLandmarks: landmarks size:size];
+              for (int i = 0; i < size; i++) {
+                [ary addObject:[NSNumber numberWithFloat:landmarks[i]]];
+              }
+              free(landmarks);
+              break;
+            }
+          }
+        }
+    }
+#endif
+    resolve(ary);
+}
+
+RCT_EXPORT_METHOD(mediaStreamTrackGetFaceLandmark :(nonnull NSNumber *) pcId
+                  trackID : (nonnull NSString *)trackID
+                  idx : (NSNumber*) idx
+                  resolve : (RCTPromiseResolveBlock)resolve
+                  reject  : (RCTPromiseRejectBlock)reject) {
+  RTCMediaStreamTrack *track = [self trackForId:trackID pcId:pcId];
+  if ([track.kind isEqualToString:@"video"]) {
+      RTCVideoTrack *videoTrack = (RTCVideoTrack *)track;
+      resolve([videoTrack getLandmarks:idx.intValue]);
+      return ;
+  }
+  resolve(@[]);
+}
+
+RCT_EXPORT_METHOD(mediaStreamTrackGetFaceCount :(nonnull NSNumber *) pcId
+                  trackID : (nonnull NSString *)trackID
+                  resolve : (RCTPromiseResolveBlock)resolve
+                  reject  : (RCTPromiseRejectBlock)reject) {
+  int ret = 0;
+  RTCMediaStreamTrack *track = [self trackForId:trackID pcId:pcId];
+  if ([track.kind isEqualToString:@"video"]) {
+      RTCVideoTrack *videoTrack = (RTCVideoTrack *)track;
+      ret = [videoTrack getFaceCount];
+  }
+  resolve([NSNumber numberWithInt:ret]);
+}
+
+RCT_EXPORT_METHOD(mediaStreamTrackSetFaceTrack :(nonnull NSNumber *) pcId
+                  trackID : (nonnull NSString *)trackID
+                  mode : (NSNumber*) mode
+                  resolve : (RCTPromiseResolveBlock)resolve
+                  reject  : (RCTPromiseRejectBlock)reject) {
+  bool ret = false;
+  RTCMediaStreamTrack *track = [self trackForId:trackID pcId:pcId];
+  if ([track.kind isEqualToString:@"video"]) {
+      RTCVideoTrack *videoTrack = (RTCVideoTrack *)track;
+      ret = [videoTrack setFaceTracker:mode.intValue];
+  }
+  resolve([NSNumber numberWithBool:ret]);
+}
+
+RCT_EXPORT_METHOD(mediaStreamTrackGetSignalLevel : (nonnull NSNumber *)pcId : (nonnull NSString *)trackID 
+                resolve : (RCTPromiseResolveBlock)resolve
+                reject  : (RCTPromiseRejectBlock)reject) {
+    RTCMediaStreamTrack *track = [self trackForId:trackID pcId:pcId];
+    if (track && [track.kind isEqualToString:@"audio"]) {
+      RTCAudioTrack *audioTrack = (RTCAudioTrack *)track;
+      resolve([NSNumber numberWithInt:[audioTrack GetSignalLevel]]);
+    }
 }
 
 RCT_EXPORT_METHOD(mediaStreamTrackSetVolume : (nonnull NSNumber *)pcId : (nonnull NSString *)trackID : (double)volume) {

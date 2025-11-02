@@ -1,8 +1,11 @@
 package com.oney.WebRTCModule;
 
+import android.app.Activity;
 import android.util.Log;
 import android.util.Pair;
 import android.util.SparseArray;
+import android.view.View;
+import android.view.ViewGroup;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -125,6 +128,25 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
         GPUPixel.Init(reactContext);
     }
 
+    @ReactMethod
+    public void setUseCamera2(boolean val) {
+        getUserMediaImpl.setUseCamera2(val);
+    }
+    @ReactMethod
+    public void getUseCamera2(Promise cb) {
+        cb.resolve(getUserMediaImpl.useCamera2);
+    }
+    @ReactMethod
+    public void setHwCodec(boolean enc, boolean val) {
+        if (enc)
+            H264AndSoftwareVideoEncoderFactory.enabled = val;
+        else
+            H264AndSoftwareVideoDecoderFactory.enabled = val;
+    }
+    @ReactMethod
+    public void getHwCodec(boolean enc, Promise cb) {
+        cb.resolve(enc?H264AndSoftwareVideoEncoderFactory.enabled:H264AndSoftwareVideoDecoderFactory.enabled);
+    }
     @NonNull
     @Override
     public String getName() {
@@ -928,6 +950,24 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
     }
 
     @ReactMethod
+    public void mediaStreamTrackGetSignalLevel(int pcId, String id, Promise cb) {
+        ThreadUtils.runOnExecutor(() -> {
+            MediaStreamTrack track = getTrack(pcId, id);
+            if (track == null) {
+                Log.d(TAG, "mediaStreamTrackGetSignalLevel() could not find track " + id);
+                return;
+            }
+
+            if (!(track instanceof AudioTrack)) {
+                Log.d(TAG, "mediaStreamTrackGetSignalLevel() track is not an AudioTrack!");
+                return;
+            }
+
+            cb.resolve(((AudioTrack) track).GetSignalLevel());
+        });
+    }
+
+    @ReactMethod
     public void mediaStreamStartRecord(String id, String path, int ncb, Promise cb) {
         MediaStream stream = getStreamForReactTag(id);
         if (stream == null) {
@@ -1116,6 +1156,31 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
         });
     }
 
+    @ReactMethod
+    public void mediaStreamTrackGetContentHint(String id, Promise cb) {
+        ThreadUtils.runOnExecutor(() -> {
+            MediaStreamTrack track = getLocalTrack(id);
+            if (!(track instanceof VideoTrack)) {
+                Log.d(TAG, "mediaStreamTrackGetContentHint() track is not an VideoTrack!");
+                return;
+            }
+
+            cb.resolve(((VideoTrack) track).contentHint());
+        });
+    }
+    @ReactMethod
+    public void mediaStreamTrackSetContentHint(String id, int val) {
+        ThreadUtils.runOnExecutor(() -> {
+            MediaStreamTrack track = getLocalTrack(id);
+            if (!(track instanceof VideoTrack)) {
+                Log.d(TAG, "mediaStreamTrackGetContentHint() track is not an VideoTrack!");
+                return;
+            }
+
+            ((VideoTrack) track).setContentHint(val);
+        });
+    }
+
     /**
      * This serializes the transceivers current direction and mid and returns them
      * for update when an sdp negotiation/renegotiation happens
@@ -1155,6 +1220,74 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
     @ReactMethod
     public void mediaStreamTrackGetVideoEffectProperty(String id, String name, int index, Promise promise) {
         ThreadUtils.runOnExecutor(() -> {getUserMediaImpl.getVideoEffectProperty(id, name, index, promise);});
+    }
+    @ReactMethod
+    public void mediaStreamTrackGetFaceLandmarks(String id, Promise promise) {
+        ThreadUtils.runOnExecutor(() -> {
+            WritableArray array = new WritableNativeArray();
+            float[] val = getUserMediaImpl.getFaceLandmarks(id);
+            if (val!=null) {
+                for (int i=0; i<val.length; i++)
+                    array.pushDouble(val[i]);
+            }
+            promise.resolve(array);
+        });
+    }
+    @ReactMethod
+    public void mediaStreamTrackGetFaceLandmark(int pcId, String id, int idx, Promise cb) {
+        ThreadUtils.runOnExecutor(() -> {
+            MediaStreamTrack track = getTrack(pcId, id);
+            if (track == null) {
+                Log.d(TAG, "mediaStreamTrackGetFaceLandmark() could not find track " + id);
+                cb.reject(new Exception("track not found"));
+                return;
+            }
+            if (track instanceof VideoTrack) {
+                VideoTrack video = (VideoTrack)track;
+                Double[] marks = video.getLandmarks(idx);
+                WritableArray array = Arguments.createArray();
+                for(int i=0; i<marks.length;i++)
+                    array.pushDouble(marks[i].doubleValue());
+                cb.resolve(array);
+            }
+            else{
+                cb.reject(new Exception("track not found"));
+            }
+        });
+    }
+    @ReactMethod
+    public void mediaStreamTrackGetFaceCount(int pcId, String id, Promise cb) {
+        ThreadUtils.runOnExecutor(() -> {
+            MediaStreamTrack track = getTrack(pcId, id);
+            if (track == null) {
+                Log.d(TAG, "mediaStreamTrackGetFaceCount() could not find track " + id);
+                cb.reject(new Exception("track not found"));
+                return;
+            }
+            int ret = 0;
+            if (track instanceof VideoTrack) {
+                VideoTrack video = (VideoTrack)track;
+                ret = video.getFaceCount();
+            }
+            cb.resolve(ret);
+        });
+    }
+    @ReactMethod
+    public void mediaStreamTrackSetFaceTrack(int pcId, String id, int mode, Promise cb) {
+        ThreadUtils.runOnExecutor(() -> {
+            MediaStreamTrack track = getTrack(pcId, id);
+            if (track == null) {
+                Log.d(TAG, "mediaStreamTrackSetFaceTrack() could not find track " + id);
+                cb.reject(new Exception("track not found"));
+                return;
+            }
+            boolean ret = false;
+            if (track instanceof VideoTrack) {
+                VideoTrack video = (VideoTrack)track;
+                ret = video.setFaceTracker(mode);
+            }
+            cb.resolve(ret);
+        });
     }
 
     @ReactMethod
@@ -1638,5 +1771,17 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
     @ReactMethod
     public void removeListeners(Integer count) {
         // Keep: Required for RN built in Event Emitter Calls.
+    }
+    @ReactMethod
+    public void loadRnNoiseModel(String path, Promise cb) {
+        cb.resolve(mFactory.loadRnNoiseModel(path));
+    }
+    @ReactMethod
+    public void getMicrophoneScale(Promise cb) {
+        cb.resolve(mFactory.getMicrophoneScale());
+    }
+    @ReactMethod
+    public void setMicrophoneScale(float val, Promise cb) {
+        cb.resolve(mFactory.setMicrophoneScale(val));
     }
 }

@@ -128,9 +128,15 @@ class GetUserMediaImpl {
         peerConstraints.mandatory.addAll(valid);
     }
 
+    public boolean useCamera2 = true;
+    public void setUseCamera2(boolean val) {
+        Log.d(TAG, "setUseCamera2: " + val);
+        useCamera2 = val;
+        cameraEnumerator = null;
+    }
     private CameraEnumerator getCameraEnumerator() {
         if (cameraEnumerator == null) {
-            if (Camera2Enumerator.isSupported(reactContext)) {
+            if (Camera2Enumerator.isSupported(reactContext) && useCamera2) {
                 Log.d(TAG, "Creating camera enumerator using the Camera2 API");
                 cameraEnumerator = new Camera2Enumerator(reactContext);
             } else {

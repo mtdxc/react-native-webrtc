@@ -22,7 +22,7 @@ import java.util.List;
 public class H264AndSoftwareVideoEncoderFactory implements VideoEncoderFactory {
     private final VideoEncoderFactory hardwareVideoEncoderFactory;
     private final VideoEncoderFactory softwareVideoEncoderFactory;
-
+    public static boolean enabled = true;
     public H264AndSoftwareVideoEncoderFactory(@Nullable EglBase.Context eglContext) {
         this.hardwareVideoEncoderFactory = new HardwareVideoEncoderFactory(eglContext, false, true);
         this.softwareVideoEncoderFactory = new SoftwareVideoEncoderFactoryProxy();
@@ -31,11 +31,13 @@ public class H264AndSoftwareVideoEncoderFactory implements VideoEncoderFactory {
     @Nullable
     @Override
     public VideoEncoder createEncoder(VideoCodecInfo codecInfo) {
-        if (codecInfo.name.equalsIgnoreCase("H264")) {
-            return this.hardwareVideoEncoderFactory.createEncoder(codecInfo);
+        VideoEncoder ret = null;
+        if (enabled && codecInfo.name.equalsIgnoreCase("H264")) {
+            ret = this.hardwareVideoEncoderFactory.createEncoder(codecInfo);
         }
-
-        return this.softwareVideoEncoderFactory.createEncoder(codecInfo);
+        if (ret == null)
+            ret =  this.softwareVideoEncoderFactory.createEncoder(codecInfo);
+        return ret;
     }
 
     @Override
@@ -44,18 +46,19 @@ public class H264AndSoftwareVideoEncoderFactory implements VideoEncoderFactory {
 
         VideoCodecInfo h264Baseline = null;
         VideoCodecInfo h264High = null;
-
-        VideoCodecInfo[] hwCodecs = this.hardwareVideoEncoderFactory.getSupportedCodecs();
-        for (VideoCodecInfo hwCodec : hwCodecs) {
-            if (hwCodec.name.equalsIgnoreCase("H264")) {
-                String profileLevel = hwCodec.params.get(VideoCodecInfo.H264_FMTP_PROFILE_LEVEL_ID);
-                if (profileLevel == null) {
-                    continue;
-                }
-                if (profileLevel.equalsIgnoreCase(VideoCodecInfo.H264_CONSTRAINED_HIGH_3_1)) {
-                    h264High = hwCodec;
-                } else if (profileLevel.equalsIgnoreCase(VideoCodecInfo.H264_CONSTRAINED_BASELINE_3_1)) {
-                    h264Baseline = hwCodec;
+        if (enabled) {
+            VideoCodecInfo[] hwCodecs = this.hardwareVideoEncoderFactory.getSupportedCodecs();
+            for (VideoCodecInfo hwCodec : hwCodecs) {
+                if (hwCodec.name.equalsIgnoreCase("H264")) {
+                    String profileLevel = hwCodec.params.get(VideoCodecInfo.H264_FMTP_PROFILE_LEVEL_ID);
+                    if (profileLevel == null) {
+                        continue;
+                    }
+                    if (profileLevel.equalsIgnoreCase(VideoCodecInfo.H264_CONSTRAINED_HIGH_3_1)) {
+                        h264High = hwCodec;
+                    } else if (profileLevel.equalsIgnoreCase(VideoCodecInfo.H264_CONSTRAINED_BASELINE_3_1)) {
+                        h264Baseline = hwCodec;
+                    }
                 }
             }
         }

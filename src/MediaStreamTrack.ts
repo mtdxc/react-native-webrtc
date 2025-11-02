@@ -92,6 +92,19 @@ export default class MediaStreamTrack extends EventTarget<MediaStreamTrackEventM
         WebRTCModule.mediaStreamTrackSetEnabled(this.remote ? this._peerConnectionId : -1, this.id, this._enabled);
     }
 
+    get contentHint(): Promise<number> {
+        if (!WebRTCModule.mediaStreamTrackGetContentHint) {
+            return Promise.resolve(0);
+        }
+        return WebRTCModule.mediaStreamTrackGetContentHint(this.id);
+    }
+
+    set contentHint(val: number) {
+        if (WebRTCModule.mediaStreamTrackSetContentHint) {
+            WebRTCModule.mediaStreamTrackSetContentHint(this.id, val);
+        }
+    }
+
     get muted(): boolean {
         return this._muted;
     }
@@ -173,7 +186,39 @@ export default class MediaStreamTrack extends EventTarget<MediaStreamTrackEventM
             throw new Error('Only implemented for video tracks');
         }
         return WebRTCModule.mediaStreamTrackGetVideoEffectProperty(this.id, name, index);
-    } 
+    }
+
+    getFaceLandmarks() {
+        if (this.remote) {
+            throw new Error('Not implemented for remote tracks');
+        }
+
+        if (this.kind !== 'video') {
+            throw new Error('Only implemented for video tracks');
+        }
+        return WebRTCModule.mediaStreamTrackGetFaceLandmarks(this.id);
+    }
+    
+    // seeta人脸识别,5点和81点
+    setFaceTrack(mode:number): Promise<boolean> {
+        if (this.kind !== 'video') {
+            throw new Error('Only implemented for video tracks');
+        }
+        return WebRTCModule.mediaStreamTrackSetFaceTrack(this.remote ? this._peerConnectionId : -1, this.id, mode);
+    }
+    getFaceCount(): Promise<number> {
+        if (this.kind !== 'video') {
+            throw new Error('Only implemented for video tracks');
+        }
+        return WebRTCModule.mediaStreamTrackGetFaceCount(this.remote ? this._peerConnectionId : -1, this.id);
+    }
+    getFaceLandmark(idx:number) {
+        if (this.kind !== 'video') {
+            throw new Error('Only implemented for video tracks');
+        }
+        return WebRTCModule.mediaStreamTrackGetFaceLandmark(this.remote ? this._peerConnectionId : -1, this.id, idx);
+    }
+
     /**
      * Internal function which is used to set the muted state on remote tracks and
      * emit the mute / unmute event.
@@ -202,6 +247,15 @@ export default class MediaStreamTrack extends EventTarget<MediaStreamTrackEventM
         WebRTCModule.mediaStreamTrackSetVolume(this.remote ? this._peerConnectionId : -1, this.id, volume);
     }
 
+    _getSignalLevel() : Promise<number> {
+        if (this.kind !== 'audio') {
+            throw new Error('Only implemented for audio tracks');
+        }
+        if (!WebRTCModule.mediaStreamTrackGetSignalLevel) {
+            return Promise.resolve(-1);
+        }
+        return WebRTCModule.mediaStreamTrackGetSignalLevel(this.remote ? this._peerConnectionId : -1, this.id);
+    }
 
     startRecord(path: String, cb ?:number) : Promise<boolean> {
         if (!WebRTCModule.mediaStreamTrackStartRecord) {

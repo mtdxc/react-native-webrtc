@@ -277,7 +277,9 @@
         if (diff < currentDiff) {
             selectedFormat = format;
             currentDiff = diff;
-        } else if (diff == currentDiff && pixelFormat == [_capturer preferredOutputPixelFormat]) {
+        }
+        else if (diff == currentDiff && (pixelFormat == [_capturer preferredOutputPixelFormat] || pixelFormat == kCVPixelFormatType_32BGRA))
+        {
             selectedFormat = format;
         }
     }

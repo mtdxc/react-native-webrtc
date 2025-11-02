@@ -162,4 +162,19 @@ RCT_EXPORT_MODULE();
     ];
 }
 
+RCT_EXPORT_METHOD(loadRnNoiseModel : (NSString *)path
+                  resolver : (RCTPromiseResolveBlock)resolve
+                  rejecter : (RCTPromiseRejectBlock)reject) {
+  resolve([NSNumber numberWithBool:[_peerConnectionFactory loadRnNoiseModel:path]]);
+}
+
+RCT_EXPORT_METHOD(setMicrophoneScale : (float)val
+                  resolver : (RCTPromiseResolveBlock)resolve
+                  rejecter : (RCTPromiseRejectBlock)reject) {
+  resolve([NSNumber numberWithBool:[_peerConnectionFactory setMicrophoneScale:val]]);
+}
+RCT_EXPORT_METHOD(getMicrophoneScale : (RCTPromiseResolveBlock)resolve
+                  rejecter : (RCTPromiseRejectBlock)reject) {
+  resolve([NSNumber numberWithFloat:[_peerConnectionFactory getMicrophoneScale]]);
+}
 @end
