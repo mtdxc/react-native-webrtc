@@ -217,7 +217,8 @@ public class WebRTCView extends ViewGroup implements FlvPlayer.Observer {
     protected void onDetachedFromWindow() {
         try {
             if (player!= null) {
-                player.setPaused(true);
+                closeFlv();
+                //player.setPaused(true);
             }
             // Generally, OpenGL is only necessary while this View is attached
             // to a window so there is no point in having the whole rendering
@@ -633,7 +634,8 @@ public class WebRTCView extends ViewGroup implements FlvPlayer.Observer {
 
     public void closeFlv() {
         if (this.player!=null) {
-            this.player.stop(true);
+            this.player.stop(false);
+            this.player.dispose();
             this.player = null;
             removeRendererFromVideoTrack();
         }

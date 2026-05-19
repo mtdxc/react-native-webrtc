@@ -393,7 +393,7 @@
 
 -(void)closeFlv {
   if (_player) {
-    [_player stop:true];
+    [_player stop:false];
     _player = nil;
     [self clearView];
   }
