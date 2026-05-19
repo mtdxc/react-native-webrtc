@@ -147,7 +147,7 @@ RCT_EXPORT_METHOD(AudioEncClose:(int) handle)
   [AudioUtil AudioEncClose:handle];
 }
 
-RCT_EXPORT_METHOD(WavTpMp3:(NSString*) src
+RCT_EXPORT_METHOD(WavToMp3:(NSString*) src
                   mp3:(NSString*) mp3
                   bitrate:(int) bitrate
                   resolve: (RCTPromiseResolveBlock)resolve
@@ -194,5 +194,24 @@ RCT_EXPORT_METHOD(FlacToWav:(NSString*) src
   resolve([NSNumber numberWithInt:ret]);
 }
 
+RCT_EXPORT_METHOD(OggToWav:(NSString*) src
+                  wav:(NSString*) wav
+                  resolve: (RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+{
+  int ret = [AudioUtil OggToWav:src wav:wav];
+  resolve([NSNumber numberWithInt:ret]);
+}
+
+RCT_EXPORT_METHOD(WavToFmt:(NSString*) wav
+                  wav:(NSString*) path
+                  bitrate:(int) bitrate
+                  fmt:(int) fmt
+                  resolve: (RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+{
+  int ret = [AudioUtil WavToFmt:wav dstPath:path bitrate:bitrate fmt:fmt];
+  resolve([NSNumber numberWithInt:ret]);
+}
 @end
 

@@ -9,18 +9,37 @@ import com.facebook.react.bridge.ReadableArray;
 import org.webrtc.Logging;
 import org.webrtc.RTCAudioEngine;
 import org.webrtc.AudioUtil;
+
+import android.media.AudioManager;
 import android.util.Base64;
 
 import java.io.File;
 
-public class RtcAudioEngineController extends ReactContextBaseJavaModule {
+/**
+ * Created by cqm on 2017/4/18.
+ */
 
+public class RtcAudioEngineController extends ReactContextBaseJavaModule {
+    ReactApplicationContext context;
     public RtcAudioEngineController(ReactApplicationContext reactContext) {
         super(reactContext);
+        this.context = reactContext;
     }
     @Override
     public String getName() {
         return "RtcAudioEngineController";
+    }
+
+    @ReactMethod
+    void setSpeakerOn(boolean speaker) {
+        AudioManager audioManager = (AudioManager)this.context.getSystemService(this.context.AUDIO_SERVICE);
+        /* use in RnSound
+        if (speaker)
+            audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
+        else
+            audioManager.setMode(AudioManager.MODE_NORMAL);
+        */
+        audioManager.setSpeakerphoneOn(speaker);
     }
     @ReactMethod
     public void play(String path, int loop, float vol,Promise promise)

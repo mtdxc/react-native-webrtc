@@ -127,6 +127,18 @@ public class RtcAudioUtil extends ReactContextBaseJavaModule {
         int ret = AudioUtil.FlacToWav(path, wav);
         promise.resolve(ret);
     }
+    @ReactMethod
+    public void OggToWav(String path, String wav, Promise promise)
+    {
+        int ret = AudioUtil.OggToWav(path, wav);
+        promise.resolve(ret);
+    }
+    @ReactMethod
+    public void WavToFmt(String wav, String path, int bitrate, int format, Promise promise)
+    {
+        int ret = AudioUtil.WavToFmt(wav, path, bitrate, format);
+        promise.resolve(ret);
+    }
 
     @ReactMethod
     public void AudioEncOpen(int fmt, int samplerate, int channel, int bitrate, Promise promise) {

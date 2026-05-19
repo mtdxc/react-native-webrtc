@@ -3,10 +3,22 @@
 #import "WebRTC/AudioEngine.h"
 #import "WebRTC/AudioUtil.h"
 #import "RtcAudioEngineController.h"
-
+#import <AVFoundation/AVFoundation.h>
 @implementation RtcAudioEngineController
 
 RCT_EXPORT_MODULE();
+
+RCT_EXPORT_METHOD(setSpeakerOn : (BOOL)on) {
+    AVAudioSession *session = [AVAudioSession sharedInstance];
+    if (on) {
+        [session overrideOutputAudioPort:AVAudioSessionPortOverrideSpeaker
+                                   error:nil];
+    } else {
+        [session overrideOutputAudioPort:AVAudioSessionPortOverrideNone
+                                   error:nil];
+    }
+    [session setActive:true error:nil];
+}
 
 RCT_EXPORT_METHOD(cache:(NSString*) path
                   resolver:(RCTPromiseResolveBlock)resolve
@@ -78,8 +90,8 @@ RCT_EXPORT_METHOD(fillMem2:(int) audioId
                   rejecter:(RCTPromiseRejectBlock)reject){
   int samples = pcm.count;
   std::vector<uint8_t> bytes(samples * (type?2:1));
-  for (int i =0; i<samples; i++){
-    if (type){
+  for (int i =0; i<samples; i++) {
+    if (type) {
       short val = type == 3 ? [pcm[i] floatValue] * 32768 : [pcm[i] shortValue];
       bytes[2*i] = val & 0xFF;
       bytes[2*i + 1] = val >> 8 & 0xFF;
@@ -96,7 +108,7 @@ RCT_EXPORT_METHOD(AudioEncClose:(int) handle){
   [AudioUtil AudioEncClose:handle];
 }
 
-RCT_EXPORT_METHOD(WavTpMp3:(NSString*) src
+RCT_EXPORT_METHOD(WavToMp3:(NSString*) src
                   mp3:(NSString*) mp3
                   bitrate:(int) bitrate
                   resolve: (RCTPromiseResolveBlock)resolve
