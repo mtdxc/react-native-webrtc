@@ -932,6 +932,18 @@ public class WebRTCModule extends ReactContextBaseJavaModule {
     }
 
     @ReactMethod
+    public void mediaStreamTrackTakePhoto(int pcId, String id, String path, int quality, Promise cb) {
+        ThreadUtils.runOnExecutor(() -> {
+            boolean ret = false;
+            MediaStreamTrack track = getTrack(pcId, id);
+            if (track != null && (track instanceof VideoTrack)) {
+                 ret = ((VideoTrack) track).takePhoto(path, quality);
+            }
+            cb.resolve(ret);
+        });
+    }
+
+    @ReactMethod
     public void mediaStreamTrackSetVolume(int pcId, String id, double volume) {
         ThreadUtils.runOnExecutor(() -> {
             MediaStreamTrack track = getTrack(pcId, id);

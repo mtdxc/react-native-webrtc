@@ -496,8 +496,10 @@ RCT_EXPORT_METHOD(mediaStreamCreate : (nonnull NSString *)streamID) {
     self.localStreams[streamID] = mediaStream;
 }
 
-RCT_EXPORT_METHOD(mediaStreamAddTrack : (nonnull NSString *)streamID : (nonnull NSNumber *)pcId : (nonnull NSString *)
-                      trackID) {
+RCT_EXPORT_METHOD(mediaStreamAddTrack
+                  : (nonnull NSString *)streamID
+                  : (nonnull NSNumber *)pcId
+                  : (nonnull NSString *)trackID) {
     RTCMediaStream *mediaStream = self.localStreams[streamID];
     if (mediaStream == nil) {
         return;
@@ -515,8 +517,10 @@ RCT_EXPORT_METHOD(mediaStreamAddTrack : (nonnull NSString *)streamID : (nonnull 
     }
 }
 
-RCT_EXPORT_METHOD(mediaStreamRemoveTrack : (nonnull NSString *)streamID : (nonnull NSNumber *)
-                      pcId : (nonnull NSString *)trackID) {
+RCT_EXPORT_METHOD(mediaStreamRemoveTrack
+                  : (nonnull NSString *)streamID
+                  : (nonnull NSNumber *)pcId
+                  : (nonnull NSString *)trackID) {
     RTCMediaStream *mediaStream = self.localStreams[streamID];
     if (mediaStream == nil) {
         return;
@@ -897,6 +901,21 @@ RCT_EXPORT_METHOD(mediaStreamTrackGetVideoEffectProperty : (nonnull NSString *)t
     }
   }
   resolve(ret);
+}
+
+RCT_EXPORT_METHOD(mediaStreamTrackTakePhoto : (nonnull NSNumber *)pcId 
+    trackID : (nonnull NSString *)trackID 
+    path    : (nonnull NSString*)path
+    quality : (int) quality
+    resolve : (RCTPromiseResolveBlock)resolve
+    reject  : (RCTPromiseRejectBlock)reject) {
+    bool ret = false;
+    RTCMediaStreamTrack *track = [self trackForId:trackID pcId:pcId];
+    if (track && [track.kind isEqualToString:@"video"]) {
+        RTCVideoTrack *videoTrack = (RTCVideoTrack *)track;
+        ret = [videoTrack takePhoto: path quality:quality];
+    }
+    resolve([NSNumber numberWithBool:ret]);
 }
 
 #pragma mark - Helpers

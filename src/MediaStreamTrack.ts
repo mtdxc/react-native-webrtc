@@ -218,7 +218,14 @@ export default class MediaStreamTrack extends EventTarget<MediaStreamTrackEventM
         }
         return WebRTCModule.mediaStreamTrackGetFaceLandmark(this.remote ? this._peerConnectionId : -1, this.id, idx);
     }
+    
+    _takePhoto(path: string, quality: number) : Promise<boolean> {
+        if (this.kind !== 'video') {
+            throw new Error('Only implemented for video tracks');
+        }
 
+        return WebRTCModule.mediaStreamTrackTakePhoto(this.remote ? this._peerConnectionId : -1, this.id, path, quality);
+    }
     /**
      * Internal function which is used to set the muted state on remote tracks and
      * emit the mute / unmute event.
