@@ -7,6 +7,7 @@
 #import <React/RCTLog.h>
 #import <React/RCTUtils.h>
 #import <WebRTC/RTCLogging.h>
+#import <WebRTC/AudioEngine.h>
 #import "WebRTCModule+RTCPeerConnection.h"
 #import "WebRTCModule.h"
 #import "WebRTCModuleOptions.h"
@@ -43,9 +44,6 @@
     self = [super init];
     if (self) {
         WebRTCModuleOptions *options = [WebRTCModuleOptions sharedInstance];
-        id<RTCAudioDevice> audioDevice = options.audioDevice;
-        id<RTCVideoDecoderFactory> decoderFactory = options.videoDecoderFactory;
-        id<RTCVideoEncoderFactory> encoderFactory = options.videoEncoderFactory;
         NSDictionary *fieldTrials = options.fieldTrials;
         RTCLoggingSeverity loggingSeverity = options.loggingSeverity;
 
@@ -97,21 +95,32 @@
           }
         });
 #endif
-        if (encoderFactory == nil) {
-            encoderFactory = [[RTCDefaultVideoEncoderFactory alloc] init];
+
+        static id<RTCAudioDevice> audioDevice = nil;
+        static id<RTCVideoDecoderFactory> decoderFactory = nil;
+        static id<RTCVideoEncoderFactory> encoderFactory = nil;
+        static RTCPeerConnectionFactory* pcfactory = nil;
+        if (pcfactory == nil) {
+            audioDevice = options.audioDevice;
+            decoderFactory = options.videoDecoderFactory;
+            encoderFactory = options.videoEncoderFactory;
+            if (encoderFactory == nil) {
+                encoderFactory = [[RTCDefaultVideoEncoderFactory alloc] init];
+            }
+            if (decoderFactory == nil) {
+                decoderFactory = [[RTCDefaultVideoDecoderFactory alloc] init];
+            }
+
+            RCTLogInfo(@"Using video encoder factory: %@", NSStringFromClass([encoderFactory class]));
+            RCTLogInfo(@"Using video decoder factory: %@", NSStringFromClass([decoderFactory class]));
+            pcfactory = [[RTCPeerConnectionFactory alloc] initWithEncoderFactory:encoderFactory
+                                                                               decoderFactory:decoderFactory
+                                                                                  audioDevice:audioDevice];
         }
-        if (decoderFactory == nil) {
-            decoderFactory = [[RTCDefaultVideoDecoderFactory alloc] init];
-        }
+
         _encoderFactory = encoderFactory;
         _decoderFactory = decoderFactory;
-
-        RCTLogInfo(@"Using video encoder factory: %@", NSStringFromClass([encoderFactory class]));
-        RCTLogInfo(@"Using video decoder factory: %@", NSStringFromClass([decoderFactory class]));
-
-        _peerConnectionFactory = [[RTCPeerConnectionFactory alloc] initWithEncoderFactory:encoderFactory
-                                                                           decoderFactory:decoderFactory
-                                                                              audioDevice:audioDevice];
+        _peerConnectionFactory = pcfactory;
 
         _peerConnections = [NSMutableDictionary new];
         _localStreams = [NSMutableDictionary new];
