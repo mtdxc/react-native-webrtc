@@ -484,16 +484,17 @@ public class WebRTCView extends ViewGroup implements FlvPlayer.Observer {
                 setVideoTrack(null);
             }
 
+            this.streamURL = streamURL;
             if (videoTrack==null) {
                 closeFlv();
-                if(streamURL!=null && !streamURL.isEmpty())
+                if (streamURL!=null && !streamURL.isEmpty()) {
                     openFlv(streamURL);
+                }
+            } else {
+                // After realizing/applying the change in the value of
+                // this.streamURL, reflect it on the value of videoTrack.
+                setVideoTrack(videoTrack);
             }
-            this.streamURL = streamURL;
-
-            // After realizing/applying the change in the value of
-            // this.streamURL, reflect it on the value of videoTrack.
-            setVideoTrack(videoTrack);
         }
     }
 
@@ -628,6 +629,9 @@ public class WebRTCView extends ViewGroup implements FlvPlayer.Observer {
             player.setMuted(muted);
             player.setMutedVideo(mutedVideo);
             tryAddRendererToVideoTrack();
+        } else {
+            player.dispose();
+            player = null;
         }
         return ret;
     }

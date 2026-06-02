@@ -412,6 +412,9 @@
     _player.mutedVideo = _mutedVideo;
     _player.speed = _rate;
     _player.volume = _volume;
+  } else {
+    _player = nil;
+    RCTLogError(@"Failed to start RTCPlayer with URL: %@", url);
   }
 }
 
