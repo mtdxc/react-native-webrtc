@@ -42,7 +42,7 @@
 @property(nonatomic) BOOL muted;
 @property(nonatomic) BOOL mutedVideo;
 @property(nonatomic, copy) NSString* pid;
-
+@property(nonatomic) CGSize size;
 /**
  * In the fashion of
  * https://www.w3.org/TR/html5/embedded-content-0.html#dom-video-videowidth
@@ -147,6 +147,7 @@
         _rate = 1.0f;
         _paused = _muted = _mutedVideo = false;
         _pid = nil;
+        _size = CGSizeZero;
         [self addSubview:self.videoView];
         self.videoView.delegate = self;
     }
@@ -251,7 +252,7 @@
 - (void)setObjectFit:(RTCVideoViewObjectFit)fit {
     if (_objectFit != fit) {
         _objectFit = fit;
-
+        NSLog(@"setObjectFit %d", fit);
 #if !TARGET_OS_OSX
         if (fit == RTCVideoViewObjectFitCover) {
             self.videoView.videoContentMode = UIViewContentModeScaleAspectFill;
@@ -435,6 +436,13 @@
   if(!_player) return ;
   RTCVideoFrame* frame = [_player getVideoFrame];
   if (frame) {
+    CGSize current_size = (frame.rotation % 180 ==0)
+        ? CGSizeMake(frame.width, frame.height)
+        : CGSizeMake(frame.height, frame.width);
+    if (!CGSizeEqualToSize(_size, current_size)) {
+        _size = current_size;
+        [self.videoView setSize:_size];
+    }
     [self.videoView renderFrame:frame];
   }
 }
@@ -600,17 +608,19 @@ RCT_CUSTOM_VIEW_PROPERTY(stop, int, RTCVideoView) {
 
 typedef void (^RTCVideoViewBlock)(RTCPlayer *view);
 -(void) uiCall:(NSNumber*) reactTag check:(bool)check block:(RTCVideoViewBlock) block {
-  [self.bridge.uiManager addUIBlock:^(RCTUIManager *uiManager, NSDictionary<NSNumber *,UIView *> *viewRegistry) {
-    RTCVideoView *view =(RTCVideoView *) viewRegistry[reactTag];
-      if (!view || ![view isKindOfClass:[RTCVideoView class]]) {
-          RCTLogError(@"Cannot find NativeView with tag #%@", reactTag);
-          if (check) {
-            block(nil);
-          }
-          return;
-      }
-      block(view.player);
-  }];
+  dispatch_sync(self.bridge.uiManager.methodQueue, ^(){
+    [self.bridge.uiManager addUIBlock:^(RCTUIManager *uiManager, NSDictionary<NSNumber *,UIView *> *viewRegistry) {
+      RTCVideoView *view =(RTCVideoView *) viewRegistry[reactTag];
+        if (!view || ![view isKindOfClass:[RTCVideoView class]]) {
+            RCTLogError(@"Cannot find NativeView with tag #%@", reactTag);
+            if (check) {
+              block(nil);
+            }
+            return;
+        }
+        block(view.player);
+    }];
+  });
 }
 
 RCT_EXPORT_METHOD(stop:(nonnull NSNumber*) reactTag wait:(int)wait) {
