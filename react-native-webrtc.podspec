@@ -19,6 +19,6 @@ Pod::Spec.new do |s|
   s.libraries           = 'c', 'sqlite3', 'stdc++'
   s.framework           = 'AudioToolbox','AVFoundation', 'CoreAudio', 'CoreGraphics', 'CoreVideo', 'GLKit', 'VideoToolbox'
   s.dependency          'React-Core'
-  s.dependency          'mWebRTC', '124.1.29'
+  s.dependency          'mWebRTC', '124.1.40'
   s.vendored_frameworks = 'ios/gpupixel.framework'
 end
