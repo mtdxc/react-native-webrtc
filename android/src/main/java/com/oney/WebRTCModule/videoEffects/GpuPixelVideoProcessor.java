@@ -91,7 +91,7 @@ public class GpuPixelVideoProcessor implements VideoFrameProcessor {
     public VideoFrame process(VideoFrame frame, SurfaceTextureHelper textureHelper){
         if (input==null ||frame_count.get()>10) {
             frame_count.decrementAndGet();
-            return frame;
+            return null;
         }
         frame_count.getAndAdd(1);
         int rotation = frame.getRotation();

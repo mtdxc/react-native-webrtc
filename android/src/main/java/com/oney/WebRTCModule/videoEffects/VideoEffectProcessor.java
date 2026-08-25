@@ -98,8 +98,6 @@ public class VideoEffectProcessor implements VideoProcessor {
         }
 
         mSink.onFrame(outputFrame);
-        if (outputFrame != frame) {
-            outputFrame.release();
-        }
+        outputFrame.release();
     }
 }
