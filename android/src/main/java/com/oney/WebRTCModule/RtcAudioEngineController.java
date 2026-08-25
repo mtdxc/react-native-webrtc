@@ -33,14 +33,14 @@ public class RtcAudioEngineController extends ReactContextBaseJavaModule {
     @ReactMethod
     void setSpeakerOn(boolean speaker) {
         AudioManager audioManager = (AudioManager)this.context.getSystemService(this.context.AUDIO_SERVICE);
-        /* use in RnSound
-        if (speaker)
-            audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
-        else
-            audioManager.setMode(AudioManager.MODE_NORMAL);
-        */
         audioManager.setSpeakerphoneOn(speaker);
     }
+    @ReactMethod
+    void isSpeakerOn(Promise cb) {
+        AudioManager audioManager = (AudioManager)this.context.getSystemService(this.context.AUDIO_SERVICE);
+        cb.resolve(audioManager.isSpeakerphoneOn());
+    }
+
     @ReactMethod
     public void play(String path, int loop, float vol,Promise promise)
     {

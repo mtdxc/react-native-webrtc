@@ -20,6 +20,18 @@ RCT_EXPORT_METHOD(setSpeakerOn : (BOOL)on) {
     [session setActive:true error:nil];
 }
 
+RCT_EXPORT_METHOD(isSpeakerOn:(RCTPromiseResolveBlock)resolve
+                     rejecter:(RCTPromiseRejectBlock)reject) {
+    BOOL ret = NO;
+    AVAudioSession *session = [AVAudioSession sharedInstance];
+    for (AVAudioSessionPortDescription *output in session.currentRoute.outputs) {
+        if ([output.portType isEqualToString:AVAudioSessionPortBuiltInSpeaker]) {
+          ret = YES;
+        }
+    }
+    resolve([NSNumber numberWithBool:ret]);
+}
+
 RCT_EXPORT_METHOD(cache:(NSString*) path
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject){
