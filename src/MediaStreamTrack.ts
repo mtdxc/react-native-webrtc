@@ -1,10 +1,10 @@
-import { EventTarget, Event, defineEventAttribute } from 'event-target-shim/index';
 import { NativeModules } from 'react-native';
 import TrackDataEvent from './TrackDataEvent';
 import { MediaTrackConstraints } from './Constraints';
 import { addListener, removeListener } from './EventEmitter';
 import Logger from './Logger';
 import { deepClone, normalizeConstraints } from './RTCUtil';
+import { Event, EventTarget, getEventAttributeValue, setEventAttributeValue } from './vendor/event-target-shim';
 
 const log = new Logger('pc');
 const { WebRTCModule } = NativeModules;
@@ -72,6 +72,62 @@ export default class MediaStreamTrack extends EventTarget<MediaStreamTrackEventM
         if (!this.remote) {
             this._registerEvents();
         }
+    }
+
+    get onended() {
+        return getEventAttributeValue(this, 'ended');
+    }
+
+    set onended(value) {
+        setEventAttributeValue(this, 'ended', value);
+    }
+
+    get onmute() {
+        return getEventAttributeValue(this, 'mute');
+    }
+
+    set onmute(value) {
+        setEventAttributeValue(this, 'mute', value);
+    }
+
+    get onunmute() {
+        return getEventAttributeValue(this, 'unmute');
+    }
+
+    set onunmute(value) {
+        setEventAttributeValue(this, 'unmute', value);
+    }
+
+    get onaudio() {
+        return getEventAttributeValue(this, 'audio');
+    }
+
+    set onaudio(value) {
+        setEventAttributeValue(this, 'audio', value);
+    }
+
+    get onvideo() {
+        return getEventAttributeValue(this, 'video');
+    }
+
+    set onvideo(value) {
+        setEventAttributeValue(this, 'video', value);
+    }
+
+    get ondata() {
+        return getEventAttributeValue(this, 'data');
+    }
+
+    set ondata(value) {
+        setEventAttributeValue(this, 'data', value);
+    }
+
+    get ontext() {
+        return getEventAttributeValue(this, 'text');
+    }
+
+    set ontext(value) {
+        setEventAttributeValue(this, 'text', value);
     }
 
     get enabled(): boolean {
@@ -199,7 +255,7 @@ export default class MediaStreamTrack extends EventTarget<MediaStreamTrackEventM
         return WebRTCModule.mediaStreamTrackGetFaceLandmarks(this.id);
     }
     
-    // seetaäººè„¸è¯†åˆ«,5ç‚¹å’Œ81ç‚¹
+    // seetaÈËÁ³Ê¶±ð,5µãºÍ81µã
     setFaceTrack(mode:number): Promise<boolean> {
         if (this.kind !== 'video') {
             throw new Error('Only implemented for video tracks');
@@ -294,6 +350,11 @@ export default class MediaStreamTrack extends EventTarget<MediaStreamTrackEventM
             throw new Error('Only implemented for video tracks');
         }
 
+        // Preserve current facing mode when user doesn't specify one
+        if (constraints && !constraints?.facingMode && this._settings?.facingMode) {
+            constraints.facingMode = this._settings.facingMode;
+        }
+
         const normalized = normalizeConstraints({ video: constraints ?? true });
 
         this._settings = await WebRTCModule.mediaStreamTrackApplyConstraints(this.id, normalized.video);
@@ -348,15 +409,3 @@ export default class MediaStreamTrack extends EventTarget<MediaStreamTrackEventM
         WebRTCModule.mediaStreamTrackRelease(this.id);
     }
 }
-
-/**
- * Define the `onxxx` event handlers.
- */
-const proto = MediaStreamTrack.prototype;
-defineEventAttribute(proto, 'text');
-defineEventAttribute(proto, 'audio');
-defineEventAttribute(proto, 'video');
-defineEventAttribute(proto, 'data');
-defineEventAttribute(proto, 'ended');
-defineEventAttribute(proto, 'mute');
-defineEventAttribute(proto, 'unmute');

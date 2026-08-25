@@ -4,8 +4,10 @@ import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.media.projection.MediaProjectionManager;
+import android.media.projection.MediaProjectionConfig;
 import android.util.DisplayMetrics;
 import android.util.Log;
+import android.os.Build;
 
 import androidx.core.util.Consumer;
 
@@ -16,6 +18,7 @@ import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReadableArray;
 import com.facebook.react.bridge.ReadableMap;
+import com.facebook.react.bridge.ReadableType;
 import com.facebook.react.bridge.UiThreadUtil;
 import com.facebook.react.bridge.WritableArray;
 import com.facebook.react.bridge.WritableMap;
@@ -34,6 +37,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /**
@@ -62,6 +66,8 @@ class GetUserMediaImpl {
 
     private Promise displayMediaPromise;
     private Intent mediaProjectionPermissionResultData;
+    private boolean createConfigForDefaultDisplay = false;
+    private float resolutionScale = 1.0f;
 
     GetUserMediaImpl(WebRTCModule webRTCModule, ReactApplicationContext reactContext) {
         this.webRTCModule = webRTCModule;
@@ -74,6 +80,15 @@ class GetUserMediaImpl {
             public void onActivityResult(Activity activity, int requestCode, int resultCode, Intent data) {
                 super.onActivityResult(activity, requestCode, resultCode, data);
                 if (requestCode == PERMISSION_REQUEST_CODE) {
+                    // Guard against a duplicate onActivityResult dispatch. Some hosts (e.g.
+                    // react-native-navigation) forward the activity result to every registered
+                    // ActivityEventListener more than once, so this callback can fire twice for a
+                    // single getDisplayMedia() request. The first pass consumes displayMediaPromise;
+                    // a second pass would call reject()/resolve() on a null promise and crash.
+                    if (displayMediaPromise == null) {
+                        return;
+                    }
+
                     if (resultCode != Activity.RESULT_OK) {
                         displayMediaPromise.reject("DOMException", "NotAllowedError");
                         displayMediaPromise = null;
@@ -82,10 +97,19 @@ class GetUserMediaImpl {
 
                     mediaProjectionPermissionResultData = data;
 
-                    ThreadUtils.runOnExecutor(() -> {
-                        MediaProjectionService.launch(activity);
-                        createScreenStream();
-                    });
+                    MediaProjectionService.launch(activity)
+                        .orTimeout(10, TimeUnit.SECONDS)
+                        .whenCompleteAsync((value, error) -> {
+                            if (error != null) {
+                                Log.e(TAG, "Failed to start MediaProjection service", error);
+                                displayMediaPromise.reject("DOMException", "AbortError");
+                                displayMediaPromise = null;
+                                mediaProjectionPermissionResultData = null;
+                                return;
+                            }
+
+                            createScreenStream();
+                        }, ThreadUtils.getExecutor());
                 }
             }
         });
@@ -207,8 +231,14 @@ class GetUserMediaImpl {
 
             Log.d(TAG, "getUserMedia(video): " + videoConstraintsMap);
 
+            Activity currentActivity = this.reactContext.getCurrentActivity();
+            if (currentActivity == null) {
+                errorCallback.invoke("Error", "No current Activity.");
+                return;
+            }
+
             CameraCaptureController cameraCaptureController = new CameraCaptureController(
-                    reactContext.getCurrentActivity(), getCameraEnumerator(), videoConstraintsMap);
+                    currentActivity, getCameraEnumerator(), videoConstraintsMap);
 
             videoTrack = createVideoTrack(cameraCaptureController);
         }
@@ -269,6 +299,40 @@ class GetUserMediaImpl {
         }
     }
 
+    void initializeConstraints(ReadableMap constraints) {
+
+        // Handle the incoming params
+
+        ReadableMap androidConstraints = null;
+        if (constraints.hasKey("android") && constraints.getType("android") == ReadableType.Map) {
+            androidConstraints = constraints.getMap("android");
+        }
+
+        // Default values
+        boolean createConfigForDefaultDisplay = false;
+        float scale = 1.0f;
+
+        if (androidConstraints != null) {
+            // MediaProjectionConfig need API level 34
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE
+                && androidConstraints.hasKey("createConfigForDefaultDisplay")
+                && androidConstraints.getType("createConfigForDefaultDisplay") == ReadableType.Boolean) {
+                createConfigForDefaultDisplay = androidConstraints.getBoolean("createConfigForDefaultDisplay");
+            }
+            if (androidConstraints.hasKey("resolutionScale")
+                && androidConstraints.getType("resolutionScale") == ReadableType.Number) {
+                scale = (float) androidConstraints.getDouble("resolutionScale");
+            }
+        }
+
+        this.createConfigForDefaultDisplay = createConfigForDefaultDisplay;
+        // Force the value in [0, 1]
+        this.resolutionScale = Math.max(0.0f, Math.min(1.0f, scale));
+
+        Log.d(TAG, "initializeConstraints: createConfigForDefaultDisplay=" + this.createConfigForDefaultDisplay
+            + " resolutionScale=" + this.resolutionScale);
+    }
+
     void getDisplayMedia(final ReadableMap constraints, Promise promise) {
         if (this.displayMediaPromise != null) {
             promise.reject(new RuntimeException("Another operation is pending."));
@@ -281,6 +345,8 @@ class GetUserMediaImpl {
             return;
         }
 
+        this.initializeConstraints(constraints);
+
         this.displayMediaPromise = promise;
 
         MediaProjectionManager mediaProjectionManager =
@@ -291,8 +357,17 @@ class GetUserMediaImpl {
             UiThreadUtil.runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
-                    currentActivity.startActivityForResult(
+
+                  if (createConfigForDefaultDisplay == true) {
+                        //MediaProjectionConfig need API level 34
+                        //Return mediaProjection which restricts the user to capturing the default display
+                        currentActivity.startActivityForResult(
+                            mediaProjectionManager.createScreenCaptureIntent(MediaProjectionConfig.createConfigForDefaultDisplay()), PERMISSION_REQUEST_CODE);
+                    } else {
+                        //Return mediaProjection which allows the user to decide which region is captured
+                        currentActivity.startActivityForResult(
                             mediaProjectionManager.createScreenCaptureIntent(), PERMISSION_REQUEST_CODE);
+                    }
                 }
             });
 
@@ -302,6 +377,14 @@ class GetUserMediaImpl {
     }
 
     private void createScreenStream() {
+        // A duplicate onActivityResult dispatch (see onActivityResult above) can schedule this more
+        // than once. The single-threaded executor runs them in order, so by the time a duplicate
+        // runs the first has already consumed displayMediaPromise. Bail out instead of dereferencing
+        // a null promise or creating a second screen stream.
+        if (displayMediaPromise == null) {
+            return;
+        }
+
         VideoTrack track = createScreenTrack();
 
         if (track == null) {
@@ -379,7 +462,7 @@ class GetUserMediaImpl {
         int width = displayMetrics.widthPixels;
         int height = displayMetrics.heightPixels;
         ScreenCaptureController screenCaptureController = new ScreenCaptureController(
-                reactContext.getCurrentActivity(), width, height, mediaProjectionPermissionResultData);
+                reactContext.getCurrentActivity(), width, height, mediaProjectionPermissionResultData, resolutionScale);
         return createVideoTrack(screenCaptureController);
     }
 
