@@ -24,6 +24,7 @@ import org.webrtc.RendererCommon;
 import org.webrtc.RendererCommon.RendererEvents;
 import org.webrtc.RendererCommon.ScalingType;
 import org.webrtc.SurfaceViewRenderer;
+import com.oney.WebRTCModule.TextureViewRenderer;
 import org.webrtc.VideoFrame;
 import org.webrtc.VideoTrack;
 import org.webrtc.FlvPlayer;
@@ -144,6 +145,11 @@ public class WebRTCView extends ViewGroup implements FlvPlayer.Observer {
      */
     private final SurfaceViewRenderer surfaceViewRenderer;
 
+    private TextureViewRenderer textureViewRenderer;
+    private boolean useTextureView;
+    private boolean rendererReady; // flag for textureView init
+    private int rendererGeneration;
+
     /**
      * The {@code VideoTrack}, if any, rendered by this {@code WebRTCView}.
      */
@@ -205,7 +211,7 @@ public class WebRTCView extends ViewGroup implements FlvPlayer.Observer {
             // infrastructure hooked up while this View is not attached to a
             // window. Additionally, a memory leak was solved in a similar way
             // on iOS.
-            tryAddRendererToVideoTrack();
+            tryAddSelectedRendererToVideoTrack();
             if (player!=null)
                 player.setPaused(paused);
         } finally {
@@ -347,7 +353,15 @@ public class WebRTCView extends ViewGroup implements FlvPlayer.Observer {
                     break;
             }
         }
-        surfaceViewRenderer.layout(l, t, r, b);
+        if (useTextureView && textureViewRenderer != null) {
+            textureViewRenderer.layout(0, 0, width, height);
+            surfaceViewRenderer.layout(0, 0, 0, 0);
+        } else {
+            surfaceViewRenderer.layout(l, t, r, b);
+            if (textureViewRenderer != null) {
+                textureViewRenderer.layout(0, 0, 0, 0);
+            }
+        }
     }
 
     /**
@@ -355,6 +369,20 @@ public class WebRTCView extends ViewGroup implements FlvPlayer.Observer {
      * resources (if rendering is in progress).
      */
     private void removeRendererFromVideoTrack() {
+        rendererGeneration++;
+        if (textureViewRenderer != null) {
+            if (videoTrack != null && rendererReady) {
+                ThreadUtils.runOnExecutor(() -> {
+                    try {
+                        videoTrack.removeSink(textureViewRenderer);
+                    } catch (Throwable tr) {
+                        Log.e(TAG, "Failed to remove texture renderer", tr);
+                    }
+                });
+            }
+            textureViewRenderer.release();
+            rendererReady = false;
+        }
         if (rendererAttached) {
             if (videoTrack != null) {
                 ThreadUtils.runOnExecutor(() -> {
@@ -392,7 +420,11 @@ public class WebRTCView extends ViewGroup implements FlvPlayer.Observer {
     private void requestSurfaceViewRendererLayout() {
         // Google/WebRTC just call requestLayout() on surfaceViewRenderer when
         // they change the value of its mirror or surfaceType property.
-        surfaceViewRenderer.requestLayout();
+        if (useTextureView && textureViewRenderer != null) {
+            WebRTCView.this.requestLayout();
+        } else {
+            surfaceViewRenderer.requestLayout();
+        }
         // The above is not enough though when the video frame's dimensions or
         // rotation change. The following will suffice.
         if (!ViewCompat.isInLayout(this)) {
@@ -413,6 +445,9 @@ public class WebRTCView extends ViewGroup implements FlvPlayer.Observer {
         if (this.mirror != mirror) {
             this.mirror = mirror;
             surfaceViewRenderer.setMirror(mirror);
+            if (textureViewRenderer != null) {
+                textureViewRenderer.setMirror(mirror);
+            }
             // SurfaceViewRenderer takes the value of its mirror property into
             // account upon its layout.
             requestSurfaceViewRendererLayout();
@@ -425,6 +460,8 @@ public class WebRTCView extends ViewGroup implements FlvPlayer.Observer {
             this.player.setId(pid);
         if (this.surfaceViewRenderer != null)
             this.surfaceViewRenderer.setName(pid);
+        if (this.textureViewRenderer != null)
+            this.textureViewRenderer.setName(pid);
     }
 
     /**
@@ -451,6 +488,9 @@ public class WebRTCView extends ViewGroup implements FlvPlayer.Observer {
             }
             this.scalingType = scalingType;
             surfaceViewRenderer.setScalingType(scalingType);
+            if (textureViewRenderer != null) {
+                textureViewRenderer.setScalingType(scalingType);
+            }
         }
         // Both this instance ant its SurfaceViewRenderer take the value of
         // their scalingType properties into account upon their layouts.
@@ -520,7 +560,7 @@ public class WebRTCView extends ViewGroup implements FlvPlayer.Observer {
             this.videoTrack = videoTrack;
 
             if (videoTrack != null) {
-                tryAddRendererToVideoTrack();
+                tryAddSelectedRendererToVideoTrack();
                 if (oldVideoTrack == null) {
                     // If there was no old track, clean the surface so we start
                     // with black.
@@ -539,15 +579,25 @@ public class WebRTCView extends ViewGroup implements FlvPlayer.Observer {
      * @param zOrder The z-order to set on this {@code WebRTCView}.
      */
     public void setZOrder(int zOrder) {
+        if (useTextureView && textureViewRenderer != null) {
+            textureViewRenderer.setZ(zOrder);
+            return ;
+        }
         switch (zOrder) {
             case 0:
+                surfaceViewRenderer.setZOrderOnTop(false);
                 surfaceViewRenderer.setZOrderMediaOverlay(false);
                 break;
             case 1:
+                surfaceViewRenderer.setZOrderOnTop(false);
                 surfaceViewRenderer.setZOrderMediaOverlay(true);
                 break;
             case 2:
+                surfaceViewRenderer.setZOrderMediaOverlay(false);
                 surfaceViewRenderer.setZOrderOnTop(true);
+                break;
+            default:
+                Log.w(TAG, "Invalid zOrder value: " + zOrder);
                 break;
         }
     }
@@ -628,7 +678,7 @@ public class WebRTCView extends ViewGroup implements FlvPlayer.Observer {
             player.setSpeed(rate);
             player.setMuted(muted);
             player.setMutedVideo(mutedVideo);
-            tryAddRendererToVideoTrack();
+            tryAddSelectedRendererToVideoTrack();
         } else {
             player.dispose();
             player = null;
@@ -654,7 +704,11 @@ public class WebRTCView extends ViewGroup implements FlvPlayer.Observer {
         // Log.i(TAG, String.format("renderFrame %dx%d %d", width, height, tsp));
         VideoFrame frame = player.getVideoFrame();
         if (frame!=null) {
-            surfaceViewRenderer.onFrame(frame);
+            if (useTextureView && textureViewRenderer != null) {
+                textureViewRenderer.onFrame(frame);
+            } else {
+                surfaceViewRenderer.onFrame(frame);
+            }
             frame.release();
         }
     }
@@ -709,5 +763,59 @@ public class WebRTCView extends ViewGroup implements FlvPlayer.Observer {
         WritableMap event = Arguments.createMap();
         event.putInt("reason", reason);
         sendEvent("onEnd", event);
+    }
+
+    public void setUseTextureView(boolean useTextureView) {
+        if (this.useTextureView == useTextureView) return;
+        this.useTextureView = useTextureView;
+        if ((videoTrack != null || player != null) && ViewCompat.isAttachedToWindow(this)) {
+            removeRendererFromVideoTrack();
+            tryAddSelectedRendererToVideoTrack();
+        }
+    }
+
+    private void tryAddSelectedRendererToVideoTrack() {
+        if (useTextureView) {
+            tryAddTextureViewRendererToVideoTrack();
+        } else {
+            tryAddRendererToVideoTrack();
+        }
+    }
+
+    private void tryAddTextureViewRendererToVideoTrack() {
+        if (!useTextureView || rendererReady || (videoTrack == null && player == null)) return;
+        if (!ViewCompat.isAttachedToWindow(this)) return;
+
+        if (textureViewRenderer == null) {
+            textureViewRenderer = new TextureViewRenderer(getContext());
+            if (pid != null) {
+                textureViewRenderer.setName(pid);
+            }
+            textureViewRenderer.setMirror(mirror);
+            textureViewRenderer.setScalingType(scalingType);
+            addView(textureViewRenderer, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
+        }
+
+        EglBase.Context sharedContext = EglUtils.getRootEglBaseContext();
+        if (sharedContext == null) return;
+
+        try {
+            textureViewRenderer.init(sharedContext, rendererEvents);
+            rendererReady = true;
+            final int generation = rendererGeneration;
+            final TextureViewRenderer renderer = textureViewRenderer;
+            final VideoTrack track = videoTrack;
+            ThreadUtils.runOnExecutor(() -> {
+                try {
+                    if (generation == rendererGeneration && useTextureView && rendererReady && track != null) {
+                        track.addSink(renderer);
+                    }
+                } catch (Throwable tr) {
+                    Log.e(TAG, "Failed to add texture renderer to video track", tr);
+                }
+            });
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to init TextureViewRenderer", e);
+        }
     }
 }

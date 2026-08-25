@@ -29,6 +29,14 @@ export interface RTCVideoViewProps extends ViewProps {
   objectFit?: 'contain' | 'cover';
 
   /**
+   * Use TextureView instead of SurfaceView for rendering.
+   * TextureView supports hardware acceleration and allows rounded corners.
+   *
+   * useTextureView: boolean
+   */
+  useTextureView?: boolean;
+
+  /**
    * URL / id of the stream that should be rendered.
    *
    * streamURL: string
